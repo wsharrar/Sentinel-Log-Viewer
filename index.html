@@ -201,6 +201,11 @@
     font-size: 10px; color: #b4c7b9; line-height: 1.4;
   }
   .flight-legend .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+  .flight-legend .alt-ramp { height: 7px; border-radius: 4px; margin-top: 5px; background: linear-gradient(90deg, #1f78b5, #17bfcf, #2ca02c, #ffd64f, #d62728); }
+  .flight-legend .alt-ramp-lbl { display: flex; justify-content: space-between; gap: 8px; font-size: 9px; color: #8fa596; }
+  .terrain-attr { position: absolute; right: 12px; bottom: 60px; font-size: 9.5px; color: #dfe7e1; background: rgba(8, 13, 10, 0.6); padding: 2px 7px; border-radius: 4px; pointer-events: none; }
+  .terrain-attr:empty { display: none; }
+  .flight3d-msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #080d0a; z-index: 5; }
 
   .error { background: #2b1515; border: 1px solid #5a2a2a; color: #ff8a80; padding: 14px 16px; border-radius: 10px; margin-top: 20px; font-size: 13px; }
   .empty-chart { padding: 40px; color: #8fa596; text-align: center; font-size: 13px; }
@@ -595,6 +600,13 @@
   /* charts sharing a card with controls (custom plot, anomaly strip, GPS heatmap) get just a light frame */
   .plot-frame { background: #dce8f4; border: 1px solid #b6cbe1; border-radius: 8px; padding: 6px; }
   .sync-chart { background: #dce8f4; }
+  /* Units menu, opened from the ruler button beside each chart's PNG download button */
+  .units-menu { position: fixed; z-index: 9999; background: #fff; border: 1px solid #8a8a8a; border-radius: 6px; box-shadow: 0 6px 18px #0005; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; min-width: 210px; font: 12px 'Segoe UI', Arial, sans-serif; color: #222; }
+  .units-menu .units-head { font-weight: 600; color: #a0522d; }
+  .units-menu label { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .units-menu select { font: inherit; padding: 2px 4px; border: 1px solid #b6cbe1; border-radius: 4px; background: #f7fafd; color: #222; }
+  .units-menu .units-reset { font: inherit; margin-top: 2px; padding: 3px 8px; border: 1px solid #b6cbe1; border-radius: 4px; background: #dce8f4; color: #222; cursor: pointer; }
+  .cp-unit { color: #6f8a78; font-size: 10.5px; }
 
   /* ---------- Transmitter logs ---------- */
   .home-card .hc-img.tx { background: radial-gradient(ellipse at 50% 40%, #1f6b3555 0%, #0b140f 75%); display: flex; align-items: center; justify-content: center; }
@@ -875,7 +887,11 @@
               <option value="2" selected>2x</option><option value="5">5x</option><option value="10">10x</option>
             </select>
             <span class="time" id="timeDisplay">0.0 / 0.0 s</span>
+            <select id="terrainStyle" title="Real-world terrain under the flight">
+              <option value="satellite" selected>Satellite</option><option value="topo">Topographic</option><option value="streets">Streets</option><option value="off">No map (grid)</option>
+            </select>
           </div>
+          <div class="terrain-attr" id="terrainAttr"></div>
         </div>
       </div>
       <div class="sync-panel" id="syncPanel">
@@ -1152,6 +1168,11 @@
       <div class="chart-container"><div class="chart-title">Individual Motor Demand vs Battery Current <span><button class="info-btn" onclick="showInfo('motorbat-demand')">i</button><button class="export-btn" onclick="exportChart('chart-mbat-demand','mbat_demand')">Export CSV</button></span></div><div class="chart chart-tall" id="chart-mbat-demand"></div></div>
     </div>
 
+    <div class="section-title">Current by Flight Phase <span class="bat-note" style="font-weight:400;letter-spacing:0">takeoff, landing and yawing compared with steady flight <button class="info-btn" onclick="showInfo('bat-phase')">i</button></span></div>
+    <div id="batPhase"><div class="bat-empty">Load a flight log to see takeoff, landing and yaw current.</div></div>
+    <div class="chart-container"><div class="chart-title">Current &amp; Voltage vs Yaw Rate <span><button class="info-btn" onclick="showInfo('bat-yaw')">i</button><button class="export-btn" onclick="exportChart('chart-bat-yaw','current_vs_yaw')">Export CSV</button></span></div><div class="chart chart-tall" id="chart-bat-yaw"></div></div>
+    <div class="chart-container"><div class="chart-title">Current &amp; Yaw Rate over Time <span class="hint">green = takeoff, red = landing windows used above</span> <span><button class="export-btn" onclick="exportChart('chart-bat-yawt','current_yaw_time')">Export CSV</button></span></div><div class="chart" id="chart-bat-yawt"></div></div>
+
     <div class="section-title">Pack Wiring Schematics</div>
     <div class="bat-schem-grid">
       <div class="bat-schem-card"><div class="bsc-title">Single Pack &mdash; 6S1P <span>&times; 9 identical packs</span></div><svg id="packSchem" viewBox="0 0 860 420" aria-label="6S1P pack wiring"></svg></div>
@@ -1308,7 +1329,7 @@ const COPTER_MODES={0:'STABILIZE',1:'ACRO',2:'ALT_HOLD',3:'AUTO',4:'GUIDED',5:'L
 
 // Multi-instance messages (dual GPS, multiple IMUs/baros/batteries, EKF3 cores) are interleaved in the log.
 // Keep only the primary (lowest) instance so plots and samplers don't zig-zag between sensors.
-const INSTANCE_FIELDS={ACC:'I',GYR:'I',MAG:'I',GPS:'I',GPA:'I',IMU:'I',BARO:'I',VIBE:'IMU',BAT:['Inst','Instance'],XKF1:'C',XKF2:'C',XKF3:'C',XKF4:'C',XKF5:'C',XKQ:'C'};
+const INSTANCE_FIELDS={ACC:'I',GYR:'I',MAG:'I',GPS:'I',GPA:'I',IMU:'I',BARO:'I',VIBE:'IMU',BAT:['Inst','Instance'],XKF1:'C',XKF2:'C',XKF3:'C',XKF4:'C',XKF5:'C',XKQ:'C',NKF1:'C',NKF2:'C',NKF3:'C',NKF4:'C',NKF5:'C',NKQ:'C'};
 function selectPrimaryInstances(messages){
   const out={...messages};
   for(const [type,keys] of Object.entries(INSTANCE_FIELDS)){
@@ -1487,6 +1508,37 @@ updateMotorNames();
 
 let parsedMessages = null, rawMessages = null, globalT0 = 0, currentFileName = '';
 
+// Field units from the log's own FMTU table, the same source the ArduPilot log viewer labels fields from.
+// The parser has already divided c/C/e/E fields by 100 and L by 1e7, so only the multiplier left over goes into the unit
+// (CTUN.CRt is an int16 with multiplier 0.01 m/s, i.e. cm/s; GPS.Alt is int32 / 100, i.e. m).
+let logUnits = {};
+const FMTU_UNITS = { A: 'A', a: 'Ah', d: '°', b: 'B', k: '°/s', D: 'decimal °', e: '°/s²', E: 'rad/s', G: 'Gauss', h: '°', i: 'A·s', J: 'W·s', L: 'rad/s²',
+  m: 'm', n: 'm/s', o: 'm/s²', O: '°C', P: 'Pa', '%': '%', S: 'satellites', s: 's', q: 'rpm', r: 'rad', U: 'decimal °', u: 'ppm', v: 'V', w: 'Ω', X: 'Wh', Y: 'µs', z: 'Hz' };
+const FMTU_MULTS = { 2: 1e2, 1: 1e1, 0: 1, A: 1e-1, B: 1e-2, C: 1e-3, D: 1e-4, E: 1e-5, F: 1e-6, G: 1e-7, I: 1e-9, '!': 3.6, '/': 3600 };
+function buildLogUnits(formats, fmtu) {
+  const out = {}, near = (a, b) => Math.abs(a / b - 1) < 1e-6;
+  for (const u of fmtu || []) {
+    const f = formats[u.FmtType]; if (!f || typeof u.UnitIds !== 'string') continue;
+    const o = out[f.name] = {};
+    f.labels.forEach((lab, i) => {
+      const base = FMTU_UNITS[u.UnitIds[i]]; if (!base) return;
+      const c = f.format[i], parsed = 'cCeE'.includes(c) ? 0.01 : c === 'L' ? 1e-7 : 1;
+      const mk = (u.MultIds || '')[i], m = FMTU_MULTS[mk];
+      const rest = m == null || (mk === '0' && parsed !== 1) ? 1 : m / parsed;   // '-' / '?' multipliers: unit as is
+      let unit = base;
+      if (near(rest, 1)) unit = base;
+      else if (base === 'decimal °' && near(rest, 1e-7)) unit = 'degE7';
+      else if (near(rest, 0.01) && /^m(\/s(²)?)?$/.test(base)) unit = 'c' + base;
+      else if (near(rest, 0.01) && base === '°') unit = 'cdeg';
+      else if (near(rest, 1e-3) && !base.includes('°')) unit = 'm' + base;
+      else if (near(rest, 1e-6) && !base.includes('°')) unit = 'µ' + base;
+      else unit = `×${+rest.toPrecision(3)} ${base}`;
+      o[lab] = unit;
+    });
+  }
+  return out;
+}
+
 async function handleFile(file) {
   if (/\.csv$/i.test(file.name)) { loadTxFile(file); return; } // Tandem X18 logs go to the Transmitter page
   showPage('viewer');
@@ -1501,16 +1553,22 @@ async function handleFile(file) {
     const parser = new DataFlashParser(buffer);
     const raw = await parser.parse(p => { progressFill.style.width=`${(p*100).toFixed(0)}%`; progressText.textContent=`Parsing... ${(p*100).toFixed(0)}%`; });
     if (!Object.keys(raw).length) throw new Error('No DataFlash messages found — is this an ArduPilot .bin log?');
-    rawMessages = raw;
+    rawMessages = raw; logUnits = buildLogUnits(parser.formats, raw.FMTU);
     const messages = selectPrimaryInstances(raw);
     statusText.textContent = `${file.name}  ·  ${Object.keys(messages).length} types`;
     progressWrap.classList.remove('active'); dashboard.classList.add('active');
     resetBtn.style.display='inline-block'; ['exportFullBtn','exportKmlBtn','genDocBtn'].forEach(id=>document.getElementById(id).style.display='inline-block'); ['cursorBtn','eventsBtn'].forEach(id=>document.getElementById(id).style.display='inline-block');
     const t0 = pickT0(messages); parsedMessages = messages; globalT0 = t0;
+    // Per-log state from a previous file: maps are only built when their tab opens, so drop them; cursor back to 0
+    if (satMap) { satMap.remove(); satMap = null; } if (fenceMap) { fenceMap.remove(); fenceMap = null; }
+    for (const id of ['satMapContainer', 'fenceMapContainer']) { const c = document.getElementById(id); if (c) c.innerHTML = ''; }
+    cursorT = cursorOn ? 0 : null;
+    if (document.querySelector('.tab.active[data-panel="satmap"], .tab.active[data-panel="fence"]')) activateTab(document.querySelector('.tab.active').dataset.panel);
+    unitLatRef = ((messages.GPS || []).find(g => g.Status >= 3 && g.Lat) || {}).Lat || 0;
     buildEventMarkers(messages, t0);
     renderSummary(messages, file, t0); renderCharts(messages, t0); renderModeTimeline(messages, t0);
     renderGCSMessages(messages, t0); renderSerialTab(messages, t0);
-    renderPIDPlots(messages, t0); renderEKFPlots(messages, t0); renderMotorBatPlots(messages, t0);
+    renderPIDPlots(messages, t0); renderEKFPlots(messages, t0); renderMotorBatPlots(messages, t0); renderBatPhases(messages, t0);
     renderBatteryPage(messages, t0);
     heatmapGPS = (messages.GPS || []).filter(g => g.Status >= 3 && g.Lat && g.Lng); renderGPSHeatmap();
     renderFFTPlots(messages, t0);
@@ -1520,7 +1578,7 @@ async function handleFile(file) {
     cursorModeSmp = (messages.MODE || []).length ? stepSampler(messages.MODE) : null;
     initCustomPlot();
     addInfoToExisting();
-    try { render3D(messages); } catch(e) { console.error('3D failed:',e); document.getElementById('flight3d').innerHTML='<div class="empty-chart">3D render failed: '+e.message+'</div>'; }
+    try { render3D(messages); } catch(e) { console.error('3D failed:',e); if (threeState && threeState.dispose) threeState.dispose(); threeState = null; show3DMessage('3D render failed: '+e.message); }
     if (txLog) { txDoAlign(); renderTxAll(); }
   } catch(e) { console.error(e); progressWrap.classList.remove('active'); uploadArea.style.display='block'; errorBox.innerHTML=`<div class="error"><strong>Parse failed:</strong> ${escHtml(e.message)}</div>`; }
 }
@@ -1536,14 +1594,14 @@ function renderSummary(messages, file, t0) {
   if(ref.length) dur=((ref[ref.length-1].TimeUS||0)-(ref[0].TimeUS||0))/1e6;
   stats.push({label:'Duration',value:`${(dur/60).toFixed(1)}`,unit:'min'});
   stats.push({label:'File size',value:`${(file.size/1048576).toFixed(1)}`,unit:'MB'});
-  if(gps.length){const a=gps.map(g=>g.Alt).filter(x=>x!=null&&!isNaN(x));if(a.length){const a0=a[0];stats.push({label:'Max alt',value:(arrMax(a)-a0).toFixed(1),unit:'m AGL'});}
+  if(gps.length){const a=gps.filter(g=>g.Status>=3).map(g=>g.Alt).filter(x=>x!=null&&!isNaN(x));if(a.length){const a0=a[0];stats.push({label:'Max alt',value:(arrMax(a)-a0).toFixed(1),unit:'m AGL'});}
     const sp=gps.map(g=>g.Spd).filter(s=>s!=null);if(sp.length)stats.push({label:'Max speed',value:arrMax(sp).toFixed(1),unit:'m/s'});
     const ns=gps.map(g=>g.NSats).filter(n=>n!=null);if(ns.length)stats.push({label:'Avg sats',value:(ns.reduce((a,b)=>a+b,0)/ns.length).toFixed(0)});}
   const bat=firstBattery(messages.BAT||messages.CURR||[]);
   if(bat.length){const vK=voltKey(bat[0]),cK=currKey(bat[0]);
     if(vK){const v=bat.map(b=>b[vK]).filter(x=>x!=null&&x>0);if(v.length)stats.push({label:'Voltage',value:`${arrMin(v).toFixed(1)}-${arrMax(v).toFixed(1)}`,unit:'V'});}
     if(cK){const a=bat.map(b=>b[cK]).filter(x=>x!=null);if(a.length)stats.push({label:'Peak current',value:arrMax(a).toFixed(1),unit:'A'});}
-    if('CurrTot'in bat[0]){const l=bat[bat.length-1].CurrTot;if(l!=null)stats.push({label:'Charge used',value:l.toFixed(0),unit:'mAh'});}}
+    if('CurrTot'in bat[0]){const l=bat[bat.length-1].CurrTot;if(l!=null&&bat[0].CurrTot!=null)stats.push({label:'Charge used',value:(l-bat[0].CurrTot).toFixed(0),unit:'mAh'});}}
   const modes=messages.MODE||[];if(modes.length){stats.push({label:'Initial mode',value:COPTER_MODES[modes[0].Mode]||`#${modes[0].Mode}`});}
   const gcsM=messages.MSG||[];if(gcsM.length)stats.push({label:'GCS messages',value:`${gcsM.length}`});
   document.getElementById('summary').innerHTML=stats.map(s=>`<div class="stat"><div class="stat-label">${s.label}</div><div class="stat-value">${s.value}${s.unit?`<span class="stat-unit">${s.unit}</span>`:''}</div></div>`).join('');
@@ -1553,7 +1611,7 @@ function renderSummary(messages, file, t0) {
 // Mode Timeline, GCS Messages
 // ============================================================================
 function renderModeTimeline(messages, t0) {
-  const modes=messages.MODE||[];if(!modes.length)return;const el=document.getElementById('modeTimeline');el.className='mode-timeline';
+  const modes=messages.MODE||[],el=document.getElementById('modeTimeline');if(!modes.length){el.className='';el.innerHTML='';return;}el.className='mode-timeline';
   el.innerHTML='<div class="chart-title" style="margin-bottom:8px">Flight Mode Changes</div>'+modes.map(m=>{const t=(m.TimeUS-t0)/1e6;const n=COPTER_MODES[m.Mode]!==undefined?COPTER_MODES[m.Mode]:`Mode ${m.Mode}`;return`<div class="mode-row" data-jump-t="${t}" title="Click to jump here"><span class="mode-chip">${t.toFixed(1)}s</span> ${n}</div>`;}).join('');
 }
 function renderGCSMessages(messages, t0) {
@@ -1593,7 +1651,7 @@ function renderSerialTab(messages, t0) {
     }
     html += '</table>';
     el.innerHTML = html;
-  }
+  } else el.innerHTML = '<div class="empty-chart">No SERIALn_* parameters in this log.</div>';
 
   const mav = messages.MAV || [];
   if (mav.length) {
@@ -1621,7 +1679,8 @@ function renderSerialTab(messages, t0) {
       if ('GCS_Util' in mav[0]) traces.push({ x:t, y:field(ds,'GCS_Util'), name:'GCS Utilization %', line:{color:'#4fc3f7',width:1.3} });
       if ('GCS_Delay' in mav[0]) traces.push({ x:t, y:field(ds,'GCS_Delay'), name:'GCS Delay ms', line:{color:'#ff8a65',width:1.3}, yaxis:'y2' });
     }
-    if (traces.length) plot('chart-mavlink', traces, { yaxis:{...AXIS_STYLE,title:'Packets/s'}, yaxis2:{...AXIS_STYLE,title:'Dropped/s',overlaying:'y',side:'right'} });
+    const perChan = 'chan' in mav[0] && 'rxp' in mav[0];   // same test as the branch above
+    if (traces.length) plot('chart-mavlink', traces, { yaxis:{...AXIS_STYLE,title:perChan?'Packets/s':'GCS utilization (%)'}, yaxis2:{...AXIS_STYLE,title:perChan?'Dropped/s':'GCS delay (ms)',overlaying:'y',side:'right'} });
     else emptyChart('chart-mavlink','MAV messages found but no recognised fields');
   } else emptyChart('chart-mavlink','No MAV messages in log');
 
@@ -1648,11 +1707,13 @@ function renderSerialTab(messages, t0) {
 const AXIS_STYLE={gridcolor:'#d3d3d3',zerolinecolor:'#a8a8a8',linecolor:'#6b6b6b',showline:true,mirror:true,ticks:'outside',tickcolor:'#6b6b6b',ticklen:4,tickfont:{color:'#333',size:11},titlefont:{color:'#a0522d',size:12}};
 const RANGESLIDER={visible:true,thickness:0.05,bgcolor:'#f3f3ea',bordercolor:'#a8a8a8',borderwidth:1};
 const PLOT_LEGEND={x:0.995,xanchor:'right',y:0.02,yanchor:'bottom',orientation:'v',bgcolor:'rgba(255,255,255,0.93)',bordercolor:'#8a8a8a',borderwidth:1,font:{size:10,color:'#222',family:'Consolas,"Courier New",monospace'}};
-const PLOT_LAYOUT={paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#ffffe0',font:{color:'#222',size:11,family:'"Segoe UI",Arial,sans-serif'},xaxis:{...AXIS_STYLE,title:'Time (s)',hoverformat:'.2f',rangeslider:RANGESLIDER},yaxis:{...AXIS_STYLE},margin:{l:62,r:62,t:10,b:10},legend:PLOT_LEGEND,hovermode:'x unified',hoverlabel:{bgcolor:'#ffffff',bordercolor:'#8a8a8a',font:{color:'#222',size:11}},modebar:{bgcolor:'rgba(0,0,0,0)',color:'#6b7a8c',activecolor:'#000'}};
+const PLOT_LAYOUT={paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#ffffe0',font:{color:'#222',size:11,family:'"Segoe UI",Arial,sans-serif'},xaxis:{...AXIS_STYLE,title:'Time (s)',hoverformat:'.3f',rangeslider:RANGESLIDER},yaxis:{...AXIS_STYLE},margin:{l:62,r:62,t:10,b:10},legend:PLOT_LEGEND,hovermode:'x unified',hoverlabel:{bgcolor:'#ffffff',bordercolor:'#8a8a8a',font:{color:'#222',size:11}},modebar:{bgcolor:'rgba(0,0,0,0)',color:'#6b7a8c',activecolor:'#000'}};
 const PLOT_CFG={responsive:true,displaylogo:false,modeBarButtonsToRemove:['select2d','lasso2d','autoScale2d'],toImageButtonOptions:{format:'png',filename:'ardupilot-chart',scale:2,height:600,width:1400}};
 const PAL=['#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd','#8c564b','#e377c2','#7f7f7f'];
 
-function emptyChart(id,msg){const el=document.getElementById(id);if(!el)return;if(el.data)Plotly.purge(el);el.innerHTML=msg?`<div class="empty-chart">${msg}</div>`:'';}
+function emptyChart(id,msg){const el=document.getElementById(id);if(!el)return;if(el.data)Plotly.purge(el);el.classList.remove('js-plotly-plot');
+  delete el._ownShapes;delete el._ownAnn;delete el._ovKey;delete el._plotSrc;delete el._unitFams;delete el._yFitBound;el._isTime=false;
+  el.innerHTML=msg?`<div class="empty-chart">${msg}</div>`:'';}
 
 let globalEventShapes = [], globalEventAnnotations = [];
 
@@ -1685,7 +1746,8 @@ function styleTraces(traces,extra){
     if((t.type&&t.type!=='scatter'&&t.type!=='scattergl')||t.mode==='markers'||t.mode==='text')continue;
     let mn=Infinity,mx=-Infinity,sum=0,n=0;
     for(const v of t.y){if(typeof v!=='number'||!isFinite(v))continue;if(v<mn)mn=v;if(v>mx)mx=v;sum+=v;n++;}
-    if(n)rows.push({t,s:[fmtStat(mn),fmtStat(mx),fmtStat(sum/n)]});
+    const fs=t._dec!=null?(v=>v.toFixed(t._dec)):fmtStat;   // _dec: decimals the chosen unit needs (e.g. 7 for decimal degrees)
+    if(n)rows.push({t,s:[fs(mn),fs(mx),fs(sum/n)]});
   }
   if(!rows.length)return traces;
   // Non-breaking spaces: SVG text collapses normal runs of spaces, which would break the column alignment
@@ -1702,18 +1764,181 @@ function styleTraces(traces,extra){
   return traces;
 }
 
+// ============================================================================
+// Unit conversion: a Units menu next to each chart's "Download plot as a png" button
+// ============================================================================
+// Units are [label, factor to the family's first unit, decimals] or [label, toBase(v,ctx), fromBase(v,ctx), decimals].
+// asLogged is the unit the .bin itself stores when the parser has already rescaled it (Lat/Lng are int degrees×10⁷,
+// which is what plot.ardupilot.org plots, so that's the default here too).
+const M_PER_DEG = 111320;
+const UNIT_FAMILIES = {
+  speed:  { name: 'Speed', units: [['m/s', 1], ['cm/s', 0.01], ['km/h', 1 / 3.6], ['mph', 0.44704], ['ft/s', 0.3048], ['kn', 1852 / 3600], ['mi/s', 1609.344, 5]] },
+  length: { name: 'Distance / altitude', units: [['m', 1], ['cm', 0.01], ['km', 1000, 4], ['ft', 0.3048], ['mi', 1609.344, 5], ['NM', 1852, 5]] },
+  accel:  { name: 'Acceleration', units: [['m/s²', 1], ['cm/s²', 0.01], ['ft/s²', 0.3048], ['g', 9.80665, 4]] },
+  angle:  { name: 'Angle', units: [['°', 1], ['rad', 180 / Math.PI, 4], ['cdeg', 0.01, 0]] },
+  rate:   { name: 'Angular rate', units: [['°/s', 1], ['rad/s', 180 / Math.PI, 4], ['rpm', 6]] },
+  latlon: { name: 'Latitude / longitude', asLogged: 'degE7', units: [['decimal °', 1, 7], ['degE7', 1e-7, 0], ['rad', 180 / Math.PI, 9], ['arcmin', 1 / 60, 4],
+    // metres north (Lat) or east (Lng) of the series' first sample
+    ['m from start', (v, c) => c.ll0 + v / (M_PER_DEG * c.k), (v, c) => (v - c.ll0) * M_PER_DEG * c.k, 2]] },
+  temp:   { name: 'Temperature', units: [['°C', 1], ['°F', v => (v - 32) / 1.8, v => v * 1.8 + 32, 1], ['K', v => v - 273.15, v => v + 273.15]] },
+  volt:   { name: 'Voltage', units: [['V', 1], ['mV', 0.001, 0]] },
+  curr:   { name: 'Current', units: [['A', 1], ['mA', 0.001, 0]] },
+  power:  { name: 'Power', units: [['W', 1], ['kW', 1000, 3], ['hp', 745.7, 3]] },
+  charge: { name: 'Charge', units: [['mAh', 1, 0], ['Ah', 1000, 3], ['A·s', 1 / 3.6, 0]] },
+  press:  { name: 'Pressure', units: [['Pa', 1, 0], ['hPa', 100], ['kPa', 1000, 3], ['psi', 6894.757, 3], ['inHg', 3386.389, 3]] },
+  mag:    { name: 'Magnetic field', units: [['mGauss', 1, 0], ['Gauss', 1000, 4], ['µT', 10, 1]] },
+};
+const UNIT_ALIAS = { 'deg': '°', 'deg/s': '°/s', 'm/s/s': 'm/s²', 'cm/s/s': 'cm/s²', 'Ohm': 'Ω', 'degC': '°C' };
+const UNIT_INDEX = {};   // label -> {fam, def}; first family wins, so a logged 'rad' is an angle, not a latitude
+for (const [fam, F] of Object.entries(UNIT_FAMILIES)) for (const u of F.units) if (!UNIT_INDEX[u[0]]) UNIT_INDEX[u[0]] = { fam, def: u };
+const unitInfo = s => (s && UNIT_INDEX[UNIT_ALIAS[s] || s]) || null;
+const unitToBase = (d, v, c) => typeof d[1] === 'function' ? d[1](v, c) : v * d[1];
+const unitFromBase = (d, v, c) => typeof d[1] === 'function' ? d[2](v, c) : v / d[1];
+const unitDec = d => typeof d[1] === 'function' ? d[3] : d[2];
+const titleText = t => typeof t === 'string' ? t : ((t && t.text) || '');
+// A unit written as a whole axis title ("m/s") or in brackets ("Voltage (V)", "Roll rate (°/s) — from RATE")
+function unitInText(s) {
+  s = titleText(s).trim(); if (!s) return null;
+  if (unitInfo(s)) return UNIT_ALIAS[s] || s;
+  for (const m of s.matchAll(/\(([^()]+)\)/g)) if (unitInfo(m[1].trim())) return UNIT_ALIAS[m[1].trim()] || m[1].trim();
+  return null;
+}
+function swapUnitText(s, from, to) {
+  const txt = titleText(s); if (!txt) return s;
+  const out = txt.trim() === from ? to : txt.split(`(${from})`).join(`(${to})`);
+  return typeof s === 'string' ? out : { ...s, text: out };
+}
+
+// Chosen unit per chart and family ('' = as logged), kept across reloads
+let unitSel = {};
+try { unitSel = JSON.parse(localStorage.getItem('sentinel-units') || '{}') || {}; } catch (e) {}
+// First GPS latitude, for the east-west scale of "m from start" on longitude series
+let unitLatRef = 0;
+
+// Returns converted copies of the traces / layout and the unit families found on the chart
+function applyUnits(id, traces, extra) {
+  const fams = new Set(), sel = unitSel[id] || {}, ax = {}, latTicks = {};
+  if (extra._noUnits) return { traces, extra, fams: [] };
+  traces = traces.map(t => {
+    if ((t.type && t.type !== 'scatter' && t.type !== 'scattergl') || !(Array.isArray(t.y) || ArrayBuffer.isView(t.y))) return t;
+    const yk = t.yaxis === 'y2' ? 'yaxis2' : 'yaxis';
+    if (t.unit === null) return t;   // explicitly unitless (e.g. a rescaled custom-plot series)
+    const from = UNIT_ALIAS[t.unit] || t.unit || unitInText(t.name) || unitInText((extra[yk] || {}).title);
+    const fi = unitInfo(from); if (!fi) return t;
+    fams.add(fi.fam);
+    const F = UNIT_FAMILIES[fi.fam], to = sel[fi.fam] || F.asLogged || from;
+    const tdef = F.units.find(u => u[0] === to), td = tdef && { fam: fi.fam, def: tdef }; if (!td) return t;
+    const dec = unitDec(td.def);
+    // Unchanged unit: only re-format when it was picked explicitly (decimal ° needs more than 2 decimals)
+    if (to === from && (dec == null || !sel[fi.fam])) return t;
+    const ctx = { ll0: 0, k: 1 };
+    if (fi.fam === 'latlon') {
+      for (const v of t.y) if (typeof v === 'number' && isFinite(v)) { ctx.ll0 = unitToBase(fi.def, v, ctx); break; }
+      if (t._lng) ctx.k = Math.cos((unitLatRef || 0) * Math.PI / 180);
+    }
+    const y = to === from ? t.y : Array.from(t.y, v => typeof v === 'number' && isFinite(v) ? unitFromBase(td.def, unitToBase(fi.def, v, ctx), ctx) : v);
+    if (to !== from) (ax[yk] = ax[yk] || {})[from] = to;
+    // Lat/Lng ticks in full (Plotly would print degE7 as "360.93M")
+    if (fi.fam === 'latlon' && dec != null && to !== 'm from start') (latTicks[yk] = `.${dec}f`);
+    const o = { ...t, y, _dec: dec, name: t.name != null ? swapUnitText(String(t.name), from, to) : t.name };
+    const fmt = dec != null ? `.${dec}f` : '.5~g';
+    if (t.hovertemplate) o.hovertemplate = t.hovertemplate.replace(/%\{y(:[^}]*)?\}(\s*)([^<]*)/, (m0, f, sp, rest) => `%{y:${fmt}}${sp}${rest.trim() === from ? to : rest}`);
+    else o.hovertemplate = `%{y:${fmt}} ${to}`;
+    return o;
+  });
+  if (Object.keys(ax).length || Object.keys(latTicks).length) {
+    extra = { ...extra };
+    for (const [yk, f] of Object.entries(latTicks)) extra[yk] = { ...(extra[yk] || {}), tickformat: f, automargin: true };
+    for (const [yk, pairs] of Object.entries(ax)) {
+      const a = { ...(extra[yk] || {}) };
+      for (const [from, to] of Object.entries(pairs)) a.title = swapUnitText(a.title, from, to);
+      const p = Object.entries(pairs);
+      const pf = p.length === 1 && unitInfo(p[0][0]), pu = pf && UNIT_FAMILIES[pf.fam].units.find(u => u[0] === p[0][1]);
+      if (a.range && pu && pf.fam !== 'latlon') {
+        const f = pf.def, tt = pu;
+        a.range = a.range.map(v => unitFromBase(tt, unitToBase(f, v, {}), {}));
+      } else delete a.range;
+      extra[yk] = a;
+    }
+  }
+  return { traces, extra, fams: [...fams] };
+}
+
+// Ruler icon; sits right after the camera ("Download plot as a png") in the mode bar
+const UNITS_BTN = { name: 'units', title: 'Change units', icon: { width: 24, height: 24, path: 'M1 7h22v10H1zM3 9v6h18V9zM5 9h1v3H5zm3 0h1v4H8zm3 0h1v3h-1zm3 0h1v4h-1zm3 0h1v3h-1z' }, click: gd => openUnitsMenu(gd) };
+const PLOT_CFG_UNITS = { ...PLOT_CFG, modeBarButtons: [['toImage', UNITS_BTN], ['zoom2d', 'pan2d'], ['zoomIn2d', 'zoomOut2d', 'resetScale2d']] };
+
+function closeUnitsMenu() { const m = document.getElementById('unitsMenu'); if (m) m.remove(); }
+function openUnitsMenu(el) {
+  const was = document.getElementById('unitsMenu'), same = was && was.dataset.chart === el.id; closeUnitsMenu(); if (same) return;
+  const fams = el._unitFams || [], sel = unitSel[el.id] || {};
+  const menu = document.createElement('div'); menu.id = 'unitsMenu'; menu.className = 'units-menu'; menu.dataset.chart = el.id;
+  menu.innerHTML = '<div class="units-head">Units</div>' + fams.map(f => { const F = UNIT_FAMILIES[f];
+    return `<label>${escHtml(F.name)}<select data-fam="${f}"><option value="">As logged${F.asLogged ? ` (${escHtml(F.asLogged)}, ArduPilot)` : ''}</option>` +
+      F.units.map(u => `<option value="${escHtml(u[0])}"${sel[f] === u[0] ? ' selected' : ''}>${escHtml(u[0])}</option>`).join('') + '</select></label>'; }).join('') +
+    '<button type="button" class="units-reset">Reset to as logged</button>';
+  document.body.appendChild(menu);
+  const b = el.querySelector('.modebar-btn[data-title="Change units"]'), r = (b || el).getBoundingClientRect();
+  menu.style.top = `${Math.round(r.bottom + 4)}px`;
+  menu.style.left = `${Math.round(Math.max(8, Math.min(r.right - menu.offsetWidth, window.innerWidth - menu.offsetWidth - 8)))}px`;
+  const apply = () => { try { localStorage.setItem('sentinel-units', JSON.stringify(unitSel)); } catch (e) {} replotUnits(el); };
+  menu.addEventListener('change', e => { const s = e.target.closest('select'); if (!s) return;
+    const cur = unitSel[el.id] = unitSel[el.id] || {}; if (s.value) cur[s.dataset.fam] = s.value; else delete cur[s.dataset.fam]; apply(); });
+  menu.querySelector('.units-reset').addEventListener('click', () => { delete unitSel[el.id]; menu.querySelectorAll('select').forEach(s => { s.value = ''; }); apply(); });
+}
+document.addEventListener('mousedown', e => { if (!e.target.closest('#unitsMenu') && !e.target.closest('.modebar-btn[data-title="Change units"]')) closeUnitsMenu(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeUnitsMenu(); });
+window.addEventListener('scroll', closeUnitsMenu, true);
+// Redraw from the unconverted traces, keeping the current zoom
+function replotUnits(el) {
+  const s = el._plotSrc; if (!s) return;
+  const xa = el.layout && el.layout.xaxis, xr = xa && xa.autorange === false && xa.range ? xa.range.slice() : null;
+  plot(el.id, s.traces, s.extra);
+  if (xr) Plotly.relayout(el, { 'xaxis.range': xr });
+}
+
+// Fit each y axis to the data inside the current x range. Skipped when the user zoomed y as well, for axes with a
+// fixed range (SoC 0–105 %, the anomaly strip), and for 2-point reference lines (thresholds) that span the whole log.
+function fitYToX(el,ev){
+  if(!el._fullLayout||!el.data||!el._isTime)return;
+  const k=Object.keys(ev||{});
+  if(!k.some(x=>x.startsWith('xaxis.range')))return;
+  if(k.some(x=>/^yaxis2?\.(range|autorange)/.test(x)))return;
+  const [a,b]=el._fullLayout.xaxis.range.map(Number),upd={};
+  for(const [ax,key] of [['y','yaxis'],['y2','yaxis2']]){
+    // the chart's own setting, not _fullLayout: a range slider makes Plotly mark y fixedrange (drag-zoom is x-only then)
+    const fa=el._fullLayout[key];if(!fa||(el.layout[key]&&el.layout[key].fixedrange)||(el._yFixed&&el._yFixed[ax]))continue;
+    let mn=Infinity,mx=-Infinity;
+    for(const d of el.data){
+      if((d.yaxis||'y')!==ax||d.visible===false||d.visible==='legendonly'||!d.x||!d.y||d.x.length<=2)continue;
+      if(d.type&&d.type!=='scatter'&&d.type!=='scattergl')continue;
+      const n=d.x.length;let i0=-1,i1=-1;
+      for(let i=0;i<n;i++){const x=d.x[i];if(i0<0&&x>=a)i0=Math.max(0,i-1);if(x<=b)i1=Math.min(n-1,i+1);}
+      if(i0<0||i1<i0)continue;
+      for(let i=i0;i<=i1;i++){const v=d.y[i];if(typeof v==='number'&&isFinite(v)){if(v<mn)mn=v;if(v>mx)mx=v;}}
+    }
+    if(mn>mx)continue;
+    const pad=mx>mn?(mx-mn)*0.06:Math.max(Math.abs(mn)*0.05,1);
+    upd[key+'.range']=[mn-pad,mx+pad];
+  }
+  if(Object.keys(upd).length)Plotly.relayout(el,upd);
+}
+
 function plot(id,traces,extra={}){
   const el=document.getElementById(id);if(!el)return;
+  el._plotSrc={traces,extra};
+  let fams;({traces,extra,fams}=applyUnits(id,traces,extra));
+  el._unitFams=fams;
   traces=styleTraces(traces,extra);
   const ly={...PLOT_LAYOUT,...extra,xaxis:{...PLOT_LAYOUT.xaxis,...(extra.xaxis||{}),rangeslider:{...RANGESLIDER,...((extra.xaxis||{}).rangeslider||{})}},yaxis:{...PLOT_LAYOUT.yaxis,...(extra.yaxis||{})}};
   if(extra.yaxis2) ly.yaxis2={...AXIS_STYLE,...extra.yaxis2};
   // Like the sample, an untitled y axis is labelled with the series it shows
   {const nm=traces.filter(t=>t.meta&&(!t.yaxis||t.yaxis==='y')).map(t=>t.meta),yt=ly.yaxis.title,ytx=typeof yt==='string'?yt:((yt&&yt.text)||'');
    if(nm.length&&!ytx)ly.yaxis.title=nm.join(', ');
-   else if(nm.length&&ytx.length<=3)ly.yaxis.title=`${nm.join(', ')} (${ytx})`;}
+   else if(nm.length&&(ytx.length<=3||unitInfo(ytx.trim())))ly.yaxis.title=nm.every(n=>n.endsWith(`(${ytx})`)||n.endsWith(ytx))?nm.join(', '):`${nm.join(', ')} (${ytx})`;}
   // The stats legend is shown even for a single series (Plotly hides one-trace legends by default)
   if(extra.showlegend===undefined&&traces.some(t=>t.meta))ly.showlegend=true;
-  delete ly._noStats;
+  delete ly._noStats; delete ly._noUnits;
   el._evOK = !extra._noEventMarkers;
   delete ly._noEventMarkers;
   if (!el.data) el.innerHTML = '';
@@ -1723,7 +1948,11 @@ function plot(id,traces,extra={}){
   const ov = overlayLayout(el);
   ly.shapes = ov.shapes; ly.annotations = ov.annotations; ly.margin = {...ly.margin, t: ov.marginT};
   el._ovKey = overlayKey();
-  Plotly.newPlot(el,traces,ly,PLOT_CFG);
+  // Stretching the x axis (drag-zoom, axis-end drag, pan, range slider) re-fits y to what's in view. Note which axes the
+  // chart pins itself before plotting: Plotly writes its auto range back into the layout object.
+  el._yFixed={y:!!(ly.yaxis&&ly.yaxis.range),y2:!!(ly.yaxis2&&ly.yaxis2.range)};
+  Plotly.newPlot(el,traces,ly,fams.length?PLOT_CFG_UNITS:PLOT_CFG);
+  if(!el._yFitBound){el._yFitBound=true;el.on('plotly_relayout',ev=>fitYToX(el,ev));}
   if (el._isTime) bindCursorClick(el);
 }
 
@@ -1765,7 +1994,7 @@ function overlayLayout(el) {
 function applyOverlays() {
   const key = overlayKey();
   document.querySelectorAll('.panel.active .js-plotly-plot, #page-battery .js-plotly-plot, #page-tx .js-plotly-plot').forEach(el => {
-    if (!el._ownShapes || el._ovKey === key || (!el._isTime && !el._evOK)) return;
+    if (!el._ownShapes || !el._fullLayout || el._ovKey === key || (!el._isTime && !el._evOK)) return;
     el._ovKey = key;
     const o = overlayLayout(el);
     Plotly.relayout(el, { shapes: o.shapes, annotations: o.annotations, 'margin.t': o.marginT });
@@ -1847,6 +2076,11 @@ function rcSticks(m) {
   const tl = lim(ch.thr), thr01 = v => !(v > 0) ? NaN : Math.max(-0.02, Math.min(1.02, (v - tl.mn) / ((tl.mx - tl.mn) || 1)));
   return { ch, roll: centred(ch.roll), pitch: centred(ch.pitch), yaw: centred(ch.yaw), thr01 };
 }
+// Number of motors: FRAME_CLASS (1 quad, 2 hexa, 3 octa, 4 octaquad, 5 Y6, 7 tri), else counted from RCOU
+function motorCount(m) {
+  const n = { 1: 4, 2: 6, 3: 8, 4: 8, 5: 6, 7: 3 }[getParam(m, 'FRAME_CLASS')];
+  return n || detectMotorCount(m.RCOU || m.RCOUT || []);
+}
 // Motor PWM range the Cube scales outputs to (MOT_PWM_MIN/MAX; 0 means "use the throttle channel's range")
 function motorRange(m) {
   const a = getParam(m, 'MOT_PWM_MIN'), b = getParam(m, 'MOT_PWM_MAX');
@@ -1927,14 +2161,14 @@ function renderCharts(m,t0) {
     if(vK)tr.push({x:t,y:field(ds,vK),name:'Voltage (V)',line:{color:'#4fc3f7',width:1.5},hovertemplate:'%{y:.2f} V<extra></extra>'});
     if(cK)tr.push({x:t,y:field(ds,cK),name:'Current (A)',line:{color:'#ff8a65',width:1.5},yaxis:'y2',hovertemplate:'%{y:.1f} A<extra></extra>'});
     plot('chart-power',tr,{yaxis:{...AXIS_STYLE,title:'Voltage (V)'},yaxis2:{...AXIS_STYLE,title:'Current (A)',overlaying:'y',side:'right'}});
-    if(vK&&cK)plot('chart-power2',[{x:t,y:ds.map(b=>(b[vK]||0)*(b[cK]||0)),name:'Power (W)',line:{color:'#ba68c8',width:1.5},fill:'tozeroy',fillcolor:'rgba(186,104,200,0.08)'}],{yaxis:{...AXIS_STYLE,title:'W'}});
+    if(vK&&cK)plot('chart-power2',[{x:t,y:ds.map(b=>b[vK]!=null&&b[cK]!=null?b[vK]*b[cK]:null),name:'Power (W)',line:{color:'#ba68c8',width:1.5},fill:'tozeroy',fillcolor:'rgba(186,104,200,0.08)'}],{yaxis:{...AXIS_STYLE,title:'W'}});
     else emptyChart('chart-power2','Need V+I');
     const bm=batteryModel(m,t0),di=downsample(bm.t.map((_,i)=>i)),bt=di.map(i=>bm.t[i]),pt=[];
     if(bm.soc0!=null){pt.push({x:bt,y:di.map(i=>bm.soc[i]),name:'SoC (coulomb count)',line:{color:'#2ca02c',width:1.8}});
       pt.push({x:bt,y:di.map(i=>bm.socV[i]),name:'SoC (V + I·R)',line:{color:'#aed581',width:1,dash:'dot'}});}
     if(bm.fcPct)pt.push({x:bt,y:di.map(i=>bm.fcPct[i]),name:'FC RemPct',line:{color:'#90a4ae',width:1,dash:'dash'}});
     pt.push({x:bt,y:di.map(i=>bm.used[i]),name:'Used (mAh)',line:{color:'#ffd54f',width:1.5},yaxis:'y2'});
-    plot('chart-battpct',pt,{yaxis:{...AXIS_STYLE,title:'State of charge (%)',range:[0,105]},yaxis2:{...AXIS_STYLE,title:'mAh used',overlaying:'y',side:'right'}});
+    plot('chart-battpct',pt,{yaxis:{...AXIS_STYLE,title:'State of charge (%)',range:[0,105]},yaxis2:{...AXIS_STYLE,title:'Used (mAh)',overlaying:'y',side:'right'}});
   } else {emptyChart('chart-power','No BAT/CURR');emptyChart('chart-power2','');emptyChart('chart-battpct','');}
 
   // RC Inputs (step interp)
@@ -1949,7 +2183,7 @@ function renderCharts(m,t0) {
   if(rcin.length&&rcout.length){
     const S=rcSticks(m),tk=`C${S.ch.thr}`,[pm,pM]=motorRange(m),mp=v=>v>0?+((v-pm)/(pM-pm)*100).toFixed(1):null;
     const di=downsample(rcin),ti=timeArray(di,'TimeUS',t0),dou=downsample(rcout),to=timeArray(dou,'TimeUS',t0);
-    const mot=[1,2,3,4,5,6].filter(i=>rcout[0][`C${i}`]!==undefined),mean=r=>{let s=0,k=0;for(const i of mot){const v=r[`C${i}`];if(v>0){s+=v;k++;}}return k?s/k:null;};
+    const mot=Array.from({length:motorCount(m)},(_,k)=>k+1).filter(i=>rcout[0][`C${i}`]!==undefined),mean=r=>{let s=0,k=0;for(const i of mot){const v=r[`C${i}`];if(v>0){s+=v;k++;}}return k?s/k:null;};
     const tr=[{x:ti,y:di.map(r=>{const v=S.thr01(r[tk]);return isFinite(v)?+(v*100).toFixed(1):null;}),name:`Throttle stick · CH${S.ch.thr}`,line:{color:'#111',width:2.4,shape:'hv'},hovertemplate:'%{y:.1f} %<extra></extra>'},
       {x:to,y:dou.map(r=>mp(mean(r))),name:'Motor mean',line:{color:'#d62728',width:2.2,shape:'hv'},hovertemplate:'%{y:.1f} %<extra></extra>'}];
     mot.forEach(i=>tr.push({x:to,y:dou.map(r=>mp(r[`C${i}`])),name:motorLabel(i),line:{color:PAL[(i-1)%8],width:0.9,shape:'hv'},opacity:0.55,hovertemplate:'%{y:.1f} %<extra></extra>'}));
@@ -1959,14 +2193,14 @@ function renderCharts(m,t0) {
     // Scatter: stick position at the moment of each RCOU sample (step lookup on the same clock), armed only
     const F=flightFacts(m,t0),stk=stepSampler(rcin),xs=[],ys=[];
     for(const r of downsample(rcout,8000)){const tc=((r.TimeUS||0)-t0)/1e6;if(!F.inArmed(tc))continue;const s=stk((r.TimeUS||0)/1e6),x=s?S.thr01(s[tk]):NaN,y=mp(mean(r));if(isFinite(x)&&y!=null){xs.push(+(x*100).toFixed(1));ys.push(y);}}
-    if(xs.length)plot('chart-rcthr-xy',[{x:xs,y:ys,type:'scattergl',mode:'markers',name:'samples',marker:{size:4,color:'#1f77b4',opacity:0.35},hovertemplate:'Stick %{x:.0f} % · motors %{y:.0f} %<extra></extra>'}],
+    if(xs.length)plot('chart-rcthr-xy',[{x:xs,y:ys,type:'scatter',mode:'markers',name:'samples',marker:{size:4,color:'#1f77b4',opacity:0.35},hovertemplate:'Stick %{x:.0f} % · motors %{y:.0f} %<extra></extra>'}],
       {_noEventMarkers:true,_noStats:true,showlegend:false,hovermode:'closest',xaxis:{title:'Throttle stick (%)',range:[-3,103],rangeslider:{visible:false}},yaxis:{...AXIS_STYLE,title:'Mean motor output (%)',range:[-3,103]},margin:{l:62,r:20,t:10,b:50}});
     else emptyChart('chart-rcthr-xy','No armed samples');
   } else {emptyChart('chart-rcthr',rcin.length?'No RCOU':'No RCIN');emptyChart('chart-rcthr-xy','');}
 
   // RC Outputs (step interp)
   if(rcout.length){const ds=downsample(rcout),t=timeArray(ds,'TimeUS',t0),tr=[],ak=[];
-    for(let i=1;i<=6;i++){const k=`C${i}`;if(rcout[0][k]!==undefined){const v=field(ds,k),mn=arrMin(v),mx=arrMax(v);if(mx>mn+10)ak.push(k);
+    for(let i=1,nm=motorCount(m);i<=nm;i++){const k=`C${i}`;if(rcout[0][k]!==undefined){const v=field(ds,k),mn=arrMin(v),mx=arrMax(v);if(mx>mn+10)ak.push(k);
       tr.push({x:t,y:v,name:motorLabel(i),line:{color:PAL[i-1],width:1.2,shape:'hv'},hovertemplate:`${motorLabel(i)}: %{y} µs<extra></extra>`});}}
     plot('chart-rcout',tr,{yaxis:{...AXIS_STYLE,title:'PWM (µs)'}});
     if(ak.length>=2){const sp=ds.map(r=>{const vs=ak.map(k=>r[k]).filter(v=>v!=null);return Math.max(...vs)-Math.min(...vs);});
@@ -1989,7 +2223,7 @@ function renderCharts(m,t0) {
 
   // Altitude
   const gps=m.GPS||[],baro=m.BARO||[],ctun=m.CTUN||[],atr=[];
-  if(gps.length){const ds=downsample(gps),a0=ds.find(g=>g.Alt!=null)?.Alt||0;atr.push({x:timeArray(ds,'TimeUS',t0),y:ds.map(g=>(g.Alt||0)-a0),name:'GPS AGL',line:{color:'#4fc3f7',width:1.5}});}
+  if(gps.length){const ds=downsample(gps),a0=(ds.find(g=>g.Status>=3&&g.Alt!=null)||ds.find(g=>g.Alt!=null)||{}).Alt||0;atr.push({x:timeArray(ds,'TimeUS',t0),y:ds.map(g=>g.Status>=3&&g.Alt!=null?g.Alt-a0:null),name:'GPS AGL',line:{color:'#4fc3f7',width:1.5}});}
   if(baro.length){const ds=downsample(baro);atr.push({x:timeArray(ds,'TimeUS',t0),y:field(ds,'Alt'),name:'Baro',line:{color:'#aed581',width:1.3}});}
   if(ctun.length&&'DAlt'in ctun[0]){const ds=downsample(ctun);atr.push({x:timeArray(ds,'TimeUS',t0),y:field(ds,'DAlt'),name:'Desired',line:{color:'#ffd54f',width:1,dash:'dot'}});}
   if(atr.length)plot('chart-altitude',atr,{yaxis:{...AXIS_STYLE,title:'m'}});else emptyChart('chart-altitude','No alt data');
@@ -2032,6 +2266,104 @@ function renderCharts(m,t0) {
     if('TxBuf'in rad[0])plot('chart-txbuf',[{x:t,y:field(ds,'TxBuf'),name:'TX Buffer %',line:{color:'#ba68c8',width:1.3,shape:'hv'},fill:'tozeroy',fillcolor:'rgba(186,104,200,0.08)'}],{yaxis:{...AXIS_STYLE,title:'%'}});
     else emptyChart('chart-txbuf','No TxBuf');
   } else {emptyChart('chart-radio','No RAD/RADIO');emptyChart('chart-txbuf','');}
+}
+
+// ============================================================================
+// Real-world terrain for the 3D view
+// ============================================================================
+// Elevation: AWS Terrain Tiles (open data, Terrarium PNG: metres = R·256 + G + B/256 − 32768, up to zoom 15).
+// Imagery: Esri / OpenStreetMap tiles. All allow cross-origin use, so this works from GitHub Pages with no API key.
+const TERRAIN_DEM = (z, x, y) => `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`;
+const TERRAIN_STYLES = {
+  satellite: { url: (z, x, y) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`, maxZ: 19, attr: 'Imagery © Esri, Maxar, Earthstar Geographics' },
+  topo:      { url: (z, x, y) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/${z}/${y}/${x}`, maxZ: 18, attr: 'Map © Esri, HERE, Garmin, USGS' },
+  streets:   { url: (z, x, y) => `https://tile.openstreetmap.org/${z}/${x}/${y}.png`, maxZ: 18, attr: '© OpenStreetMap contributors' },
+};
+const DEM_ATTR = 'Elevation: AWS Terrain Tiles (USGS 3DEP, SRTM, …)';
+// Web-Mercator world pixel of a lat/lng at zoom z
+function mercPx(lat, lng, z) { const n = 256 * 2 ** z, s = Math.sin(lat * Math.PI / 180); return [(lng + 180) / 360 * n, (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * n]; }
+function loadTileImg(url) {
+  return new Promise(res => {
+    const im = new Image(), to = setTimeout(() => { im.src = ''; res(null); }, 15000);
+    im.crossOrigin = 'anonymous';
+    im.onload = () => { clearTimeout(to); res(im); }; im.onerror = () => { clearTimeout(to); res(null); };
+    im.src = url;
+  });
+}
+// Highest zoom (≤ maxZ) whose tiles covering the box fit in maxTiles per side
+function tileZoom(bb, maxZ, maxTiles) {
+  for (let z = maxZ; z > 1; z--) {
+    const [x0, y0] = mercPx(bb.n, bb.w, z), [x1, y1] = mercPx(bb.s, bb.e, z);
+    if (Math.floor(x1 / 256) - Math.floor(x0 / 256) < maxTiles && Math.floor(y1 / 256) - Math.floor(y0 / 256) < maxTiles) return z;
+  }
+  return 1;
+}
+// Stitch the tiles covering a lat/lng box into one canvas; px(lat, lng) gives a point's pixel in it
+async function tileMosaic(urlFn, z, bb) {
+  const [x0, y0] = mercPx(bb.n, bb.w, z), [x1, y1] = mercPx(bb.s, bb.e, z);
+  const tx0 = Math.floor(x0 / 256), ty0 = Math.floor(y0 / 256), tx1 = Math.floor(x1 / 256), ty1 = Math.floor(y1 / 256);
+  const cv = document.createElement('canvas'); cv.width = (tx1 - tx0 + 1) * 256; cv.height = (ty1 - ty0 + 1) * 256;
+  const ctx = cv.getContext('2d', { willReadFrequently: true }), jobs = []; let ok = 0;
+  for (let tx = tx0; tx <= tx1; tx++) for (let ty = ty0; ty <= ty1; ty++)
+    jobs.push(loadTileImg(urlFn(z, tx, ty)).then(im => { if (im) { ctx.drawImage(im, (tx - tx0) * 256, (ty - ty0) * 256); ok++; } }));
+  await Promise.all(jobs);
+  return { cv, ctx, ok, total: jobs.length, px: (lat, lng) => { const [x, y] = mercPx(lat, lng, z); return [x - tx0 * 256, y - ty0 * 256]; } };
+}
+// Elevation sampler (metres above sea level, bilinear) for a lat/lng box, or null if the tiles can't be fetched
+async function loadElevation(bb) {
+  const z = tileZoom(bb, 15, 4), M = await tileMosaic(TERRAIN_DEM, z, bb);
+  if (M.ok < M.total) return null;   // a missing tile would decode as −32768 m; fall back to flat imagery
+  const W = M.cv.width, H = M.cv.height, d = M.ctx.getImageData(0, 0, W, H).data;
+  const e = (x, y) => { x = Math.max(0, Math.min(W - 1, x)); y = Math.max(0, Math.min(H - 1, y)); const k = (y * W + x) * 4; return d[k] * 256 + d[k + 1] + d[k + 2] / 256 - 32768; };
+  return { z, at: (lat, lng) => {
+    const [px, py] = M.px(lat, lng), x = px - 0.5, y = py - 0.5, xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi;
+    return (e(xi, yi) * (1 - fx) + e(xi + 1, yi) * fx) * (1 - fy) + (e(xi, yi + 1) * (1 - fx) + e(xi + 1, yi + 1) * fx) * fy; } };
+}
+// Terrain mesh over the local box ext (metres: x east, z = −north, origin at lat0/lon0), heights relative to yRef.
+// Returns { mesh, groundAt(x, z) }.
+function buildTerrainMesh(ext, ll, elev, yRef, imagery, N = 200) {
+  const nx = N, nz = Math.max(20, Math.round(N * (ext.z1 - ext.z0) / (ext.x1 - ext.x0)));
+  const pos = new Float32Array((nx + 1) * (nz + 1) * 3), uv = new Float32Array((nx + 1) * (nz + 1) * 2), idx = [];
+  const hAt = (x, z) => { if (!elev) return 0; const [lat, lng] = ll(x, z); return elev.at(lat, lng) - yRef; };
+  for (let j = 0, k = 0; j <= nz; j++) for (let i = 0; i <= nx; i++, k++) {
+    const x = ext.x0 + (ext.x1 - ext.x0) * i / nx, z = ext.z0 + (ext.z1 - ext.z0) * j / nz, [lat, lng] = ll(x, z);
+    pos[k * 3] = x; pos[k * 3 + 1] = hAt(x, z); pos[k * 3 + 2] = z;
+    if (imagery) { const [px, py] = imagery.px(lat, lng); uv[k * 2] = px / imagery.cv.width; uv[k * 2 + 1] = 1 - py / imagery.cv.height; }
+  }
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) { const a = j * (nx + 1) + i, b = a + 1, c = a + nx + 1, d = c + 1; idx.push(a, c, b, b, c, d); }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  g.setIndex(idx); g.computeVertexNormals();
+  const mat = new THREE.MeshLambertMaterial({ color: imagery ? 0xd8d8d8 : 0x3b5440 });
+  if (imagery) { const tex = new THREE.CanvasTexture(imagery.cv); tex.anisotropy = 8; mat.map = tex; }
+  return { mesh: new THREE.Mesh(g, mat), groundAt: hAt };
+}
+
+// Altitude colour ramp (low → high): blue, cyan, green, yellow, red
+const ALT_RAMP = [[0.12, 0.47, 0.71], [0.09, 0.75, 0.81], [0.17, 0.63, 0.17], [1.0, 0.84, 0.31], [0.84, 0.15, 0.16]];
+function altColor(u) { u = Math.max(0, Math.min(1, u)) * (ALT_RAMP.length - 1); const i = Math.min(ALT_RAMP.length - 2, Math.floor(u)), f = u - i, a = ALT_RAMP[i], b = ALT_RAMP[i + 1]; return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f]; }
+// Billboard text label, a constant size on screen (scale ≈ fraction of the view height)
+function labelSprite(text, { color = '#fff', bg = 'rgba(8,13,10,0.78)', border = '#f5b821', scale = 0.03 } = {}) {
+  const fs = 44, pad = 16, cv = document.createElement('canvas'), c = cv.getContext('2d');
+  c.font = `600 ${fs}px "Segoe UI", Arial, sans-serif`; const w = Math.ceil(c.measureText(text).width) + pad * 2, h = fs + pad;
+  cv.width = w; cv.height = h; c.font = `600 ${fs}px "Segoe UI", Arial, sans-serif`;
+  c.fillStyle = bg; c.strokeStyle = border; c.lineWidth = 4; c.beginPath(); c.roundRect ? c.roundRect(2, 2, w - 4, h - 4, 14) : c.rect(2, 2, w - 4, h - 4); c.fill(); c.stroke();
+  c.fillStyle = color; c.textBaseline = 'middle'; c.fillText(text, pad, h / 2 + 2);
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), depthTest: false, transparent: true, sizeAttenuation: false }));
+  s.scale.set(scale * w / h, scale, 1); s.renderOrder = 10; s.center.set(0.5, 0);
+  return s;
+}
+// Tube through points in order, with point i at ring i (Curve.getPointAt would re-space by arc length), so
+// setDrawRange can reveal it up to a sample index during playback
+class IndexCurve extends THREE.Curve {
+  constructor(pts) { super(); this.pts = pts; }
+  getPoint(u, out = new THREE.Vector3()) { const n = this.pts.length - 1, f = u * n, i = Math.min(n - 1, Math.floor(f)), a = this.pts[i], b = this.pts[i + 1]; return out.copy(a).lerp(b, f - i); }
+  getUtoTmapping(u) { return u; }
+}
+function pathTube(pts, radius, colors, mat) {
+  const radial = 6, g = new THREE.TubeGeometry(new IndexCurve(pts), pts.length - 1, radius, radial, false);
+  if (colors) { const c = new Float32Array((pts.length) * (radial + 1) * 3); for (let i = 0; i < pts.length; i++) for (let r = 0; r <= radial; r++) c.set(colors[i], (i * (radial + 1) + r) * 3); g.setAttribute('color', new THREE.BufferAttribute(c, 3)); }
+  const m = new THREE.Mesh(g, mat); m.userData.perSeg = radial * 6; return m;
 }
 
 // ============================================================================
@@ -2107,117 +2439,163 @@ function buildHexaDrone(bodySize) {
   return drone;
 }
 
+// Message over the 3D view (no GPS, render failure); '' hides it. The canvas and controls underneath stay in place.
+function show3DMessage(msg) {
+  const c = document.getElementById('flight3d'); let el = document.getElementById('flight3dMsg');
+  if (!el) { el = document.createElement('div'); el.id = 'flight3dMsg'; el.className = 'empty-chart flight3d-msg'; c.appendChild(el); }
+  el.textContent = msg; el.style.display = msg ? '' : 'none';
+}
 function render3D(messages) {
   const gps = (messages.GPS||[]).filter(g=>g.Status>=3&&g.Lat&&g.Lng&&Math.abs(g.Lat)<90&&Math.abs(g.Lng)<180);
   const att = messages.ATT||[];
   const container = document.getElementById('flight3d');
-  if (gps.length<2) { container.innerHTML='<div class="empty-chart">Need >=2 GPS fixes with Status>=3.</div>'; return; }
+  if (threeState && threeState.dispose) threeState.dispose();
+  show3DMessage(gps.length<2 ? 'Need ≥ 2 GPS fixes with a 3D fix (Status ≥ 3) for the 3D flight view.' : '');
+  if (gps.length<2) { threeState = null; return; }
 
   const lat0=gps[0].Lat,lon0=gps[0].Lng,alt0=gps[0].Alt;
   const mLat=111320, mLon=111320*Math.cos(lat0*Math.PI/180);
+  const ll=(x,z)=>[lat0-z/mLat,lon0+x/mLon];   // local metres (x east, z = −north) → lat/lng
+  // Height is GPS altitude above the first fix (home); the terrain is shifted so home sits on the ground
   const path=gps.map(g=>({x:(g.Lng-lon0)*mLon,y:g.Alt-alt0,z:-(g.Lat-lat0)*mLat,t:(g.TimeUS-gps[0].TimeUS)/1e6}));
-  const linePts=downsample(path,8000);
+  // Drop repeated fixes (identical position): a zero-length segment collapses the tube's frames to zero radius
+  const linePts=downsample(path,3000).filter((p,i,a)=>!i||p.x!==a[i-1].x||p.y!==a[i-1].y||p.z!==a[i-1].z);
 
-  const canvas=document.getElementById('flight3dCanvas');
+  // A fresh canvas for every log: the browser caps live WebGL contexts, and reusing a canvas whose context was
+  // released (or taken back while many WebGL charts were drawn) makes the new renderer fail
+  const canvas=document.getElementById('flight3dCanvas').cloneNode(false);
+  document.getElementById('flight3dCanvas').replaceWith(canvas);
   const w=canvas.clientWidth||container.clientWidth, h=canvas.clientHeight||540;
   const scene=new THREE.Scene();
-  scene.background=new THREE.Color(0x080d0a);
+  { const c=document.createElement('canvas');c.width=2;c.height=256;const g=c.getContext('2d'),gr=g.createLinearGradient(0,0,0,256);
+    gr.addColorStop(0,'#0a1626');gr.addColorStop(0.55,'#244a6b');gr.addColorStop(1,'#7fa7c4');g.fillStyle=gr;g.fillRect(0,0,2,256);
+    scene.background=new THREE.CanvasTexture(c); }
 
   let xMn=Infinity,xMx=-Infinity,yMn=Infinity,yMx=-Infinity,zMn=Infinity,zMx=-Infinity;
   path.forEach(p=>{xMn=Math.min(xMn,p.x);xMx=Math.max(xMx,p.x);yMn=Math.min(yMn,p.y);yMx=Math.max(yMx,p.y);zMn=Math.min(zMn,p.z);zMx=Math.max(zMx,p.z);});
   const cx=(xMn+xMx)/2,cy=(yMn+yMx)/2,cz=(zMn+zMx)/2,span=Math.max(xMx-xMn,zMx-zMn,yMx-yMn,20);
 
-  const camera=new THREE.PerspectiveCamera(55,w/h,0.1,Math.max(span*20,2000));
-  camera.position.set(cx+span*0.7,cy+span*0.7,cz+span*0.7);
+  // Mission waypoints from CMD (Alt is relative to home unless Frame==0)
+  const wpPositions = extractWaypoints(messages.CMD).map(w => ({
+    x: (w.lng - lon0) * mLon, y: w.alt != null ? (w.absAlt ? w.alt - alt0 : w.alt) : 0,
+    z: -(w.lat - lat0) * mLat, num: w.num, alt: w.alt, absAlt: w.absAlt
+  }));
+  // Terrain covers the flight and the mission with a margin around them
+  const pad=Math.max(span*0.75,150), ext={x0:xMn-pad,x1:xMx+pad,z0:zMn-pad,z1:zMx+pad};
+  for (const p of wpPositions) { ext.x0=Math.min(ext.x0,p.x-pad*0.3); ext.x1=Math.max(ext.x1,p.x+pad*0.3); ext.z0=Math.min(ext.z0,p.z-pad*0.3); ext.z1=Math.max(ext.z1,p.z+pad*0.3); }
+  const extSpan=Math.max(ext.x1-ext.x0,ext.z1-ext.z0);
+
+  const camera=new THREE.PerspectiveCamera(55,w/h,0.1,Math.max(span*20,extSpan*6,5000));
+  camera.position.set(cx+span*0.9,cy+span*1.0,cz+span*1.1);   // whole flight in view, looking north-west over the terrain
   const renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:false});
   renderer.setSize(w,h,false); renderer.setPixelRatio(Math.min(devicePixelRatio,2));
   const controls=new THREE.OrbitControls(camera,canvas);
   controls.target.set(cx,cy,cz); controls.enableDamping=true; controls.dampingFactor=0.08;
+  controls.maxPolarAngle=Math.PI*0.49; controls.maxDistance=extSpan*2.5;   // stay above the ground
 
   scene.add(new THREE.AmbientLight(0xffffff,0.55));
   const dl=new THREE.DirectionalLight(0xffffff,0.75);dl.position.set(span,span*2,span*0.5);scene.add(dl);
   const dl2=new THREE.DirectionalLight(0x4fc3f7,0.25);dl2.position.set(-span,span*0.5,-span);scene.add(dl2);
 
+  // Flat grid: shown until the real terrain arrives, when offline, or with the map turned off
+  const flatY=Math.min(0,yMn)-0.05;
   const gridSz=Math.max(span*2.5,100),divs=Math.min(Math.max(Math.round(gridSz/10),10),60);
-  const grid=new THREE.GridHelper(gridSz,divs,0x1a2235,0x111723);
-  grid.position.set(cx,yMn-Math.max(span*0.02,1),cz);scene.add(grid);
+  const grid=new THREE.GridHelper(gridSz,divs,0x2a5238,0x1a2a20);
+  grid.position.set(cx,flatY,cz);scene.add(grid);
 
+  // Flight line: tube coloured by height above home; the part already played glows white on top
   const pts=linePts.map(p=>new THREE.Vector3(p.x,p.y,p.z));
-  const pathGeo=new THREE.BufferGeometry().setFromPoints(pts);
-  const cols=new Float32Array(linePts.length*3);
-  for(let i=0;i<linePts.length;i++){const u=i/(linePts.length-1);cols[i*3]=0.31+u*0.42;cols[i*3+1]=0.76-u*0.35;cols[i*3+2]=0.97-u*0.17;}
-  pathGeo.setAttribute('color',new THREE.BufferAttribute(cols,3));
-  scene.add(new THREE.Line(pathGeo,new THREE.LineBasicMaterial({vertexColors:true})));
-
-  const barCnt=Math.min(40,linePts.length),barSt=Math.floor(linePts.length/barCnt);
-  const barMt=new THREE.LineBasicMaterial({color:0x4fc3f7,transparent:true,opacity:0.12});
-  for(let i=0;i<linePts.length;i+=barSt){const p=linePts[i];scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(p.x,p.y,p.z),new THREE.Vector3(p.x,yMn-Math.max(span*0.02,1),p.z)]),barMt));}
+  const hLo=Math.min(0,yMn), hHi=Math.max(yMx,hLo+1), tubeR=Math.max(span*0.006,0.3);
+  scene.add(pathTube(pts,tubeR,linePts.map(p=>altColor((p.y-hLo)/(hHi-hLo))),new THREE.MeshLambertMaterial({vertexColors:true})));
+  const trail=pathTube(pts,tubeR*1.6,null,new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:0.5,depthWrite:false}));
+  trail.geometry.setDrawRange(0,0);scene.add(trail);
 
   const sR=Math.max(span*0.012,0.6),sG=new THREE.SphereGeometry(sR,16,16);
   const sm=new THREE.Mesh(sG,new THREE.MeshStandardMaterial({color:0x4caf50,emissive:0x1b4421}));sm.position.copy(pts[0]);scene.add(sm);
   const em=new THREE.Mesh(sG,new THREE.MeshStandardMaterial({color:0xf44336,emissive:0x5a1a16}));em.position.copy(pts[pts.length-1]);scene.add(em);
-
-  const cLen=span*0.15,oG=new THREE.Vector3(cx,yMn-Math.max(span*0.02,1),cz);
-  scene.add(new THREE.ArrowHelper(new THREE.Vector3(0,0,-1),oG,cLen,0xff5252,cLen*0.15,cLen*0.08));
-  scene.add(new THREE.ArrowHelper(new THREE.Vector3(1,0,0),oG,cLen,0x7cb342,cLen*0.15,cLen*0.08));
 
   // Build detailed hexacopter
   const bodySize=Math.max(span*0.025,1.0);
   const drone=buildHexaDrone(bodySize);
   drone.position.copy(pts[0]);scene.add(drone);
 
-  // Waypoint visualization from CMD messages (CMD Alt is relative to home unless Frame==0)
-  const wpPositions = extractWaypoints(messages.CMD).map(w => ({
-    x: (w.lng - lon0) * mLon,
-    y: w.alt != null ? (w.absAlt ? w.alt - alt0 : w.alt) : 0,
-    z: -(w.lat - lat0) * mLat, num: w.num, alt: w.alt
-  }));
-  if (wpPositions.length > 0) {
-    const pinR = Math.max(span * 0.008, 0.35);
-    const wpLinePts = [];
-    for (const wp of wpPositions) {
-      const pinMat = new THREE.MeshStandardMaterial({ color: 0xffd54f, emissive: 0x665500 });
-      const pin = new THREE.Mesh(new THREE.SphereGeometry(pinR, 12, 12), pinMat);
-      pin.position.set(wp.x, wp.y, wp.z);
-      scene.add(pin);
-      const poleMat = new THREE.MeshStandardMaterial({ color: 0xffd54f, transparent: true, opacity: 0.5 });
-      const poleH = Math.max(wp.y - (yMn - Math.max(span * 0.02, 1)), pinR * 2);
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(pinR * 0.15, pinR * 0.15, poleH, 6), poleMat);
-      pole.position.set(wp.x, wp.y - poleH / 2, wp.z);
-      scene.add(pole);
-      const baseMat = new THREE.MeshStandardMaterial({ color: 0xffd54f, transparent: true, opacity: 0.3 });
-      const base = new THREE.Mesh(new THREE.RingGeometry(pinR * 0.5, pinR * 1.2, 16), baseMat);
-      base.rotation.x = -Math.PI / 2;
-      base.position.set(wp.x, yMn - Math.max(span * 0.02, 1) + 0.05, wp.z);
-      scene.add(base);
-      const canvas2d = document.createElement('canvas');
-      canvas2d.width = 64; canvas2d.height = 64;
-      const ctx = canvas2d.getContext('2d');
-      ctx.fillStyle = '#ffd54f';
-      ctx.beginPath(); ctx.arc(32, 32, 28, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#000'; ctx.font = 'bold 32px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(String(wp.num), 32, 33);
-      const spriteTex = new THREE.CanvasTexture(canvas2d);
-      const spriteMat = new THREE.SpriteMaterial({ map: spriteTex, sizeAttenuation: true });
-      const sprite = new THREE.Sprite(spriteMat);
-      const spriteScale = Math.max(span * 0.03, 1.5);
-      sprite.scale.set(spriteScale, spriteScale, 1);
-      sprite.position.set(wp.x, wp.y + pinR * 2.5, wp.z);
-      scene.add(sprite);
-      wpLinePts.push(new THREE.Vector3(wp.x, wp.y, wp.z));
+  const disposeTree=o=>o.traverse(c=>{if(c.geometry)c.geometry.dispose();const ms=c.material?[].concat(c.material):[];ms.forEach(m=>{if(m.map)m.map.dispose();m.dispose();});});
+  // Everything that stands on the ground; rebuilt when the terrain (and so the ground height) changes
+  let groundAt=()=>flatY, groundLayer=null, terrain=null;
+  const lblS=Math.max(span*0.035,1.2);   // home ring size
+  function buildGroundLayer(){
+    if(groundLayer){scene.remove(groundLayer);disposeTree(groundLayer);}
+    const G=new THREE.Group(), gy=(x,z)=>groundAt(x,z);
+    // Altitude curtain: a see-through wall from the flight line down to the ground, plus altitude sticks along the path
+    const cp=downsample(linePts,700),cpos=new Float32Array(cp.length*6),cidx=[];
+    cp.forEach((p,i)=>{cpos.set([p.x,p.y,p.z,p.x,gy(p.x,p.z),p.z],i*6);if(i){const a=(i-1)*2;cidx.push(a,a+1,a+2,a+1,a+3,a+2);}});
+    const cg=new THREE.BufferGeometry();cg.setAttribute('position',new THREE.BufferAttribute(cpos,3));cg.setIndex(cidx);
+    G.add(new THREE.Mesh(cg,new THREE.MeshBasicMaterial({color:0x4fc3f7,transparent:true,opacity:0.14,side:THREE.DoubleSide,depthWrite:false})));
+    const st=Math.max(1,Math.floor(cp.length/45)),sp=[];
+    for(let i=0;i<cp.length;i+=st){const p=cp[i];sp.push(p.x,p.y,p.z,p.x,gy(p.x,p.z),p.z);}
+    const sg=new THREE.BufferGeometry();sg.setAttribute('position',new THREE.Float32BufferAttribute(sp,3));
+    G.add(new THREE.LineSegments(sg,new THREE.LineBasicMaterial({color:0xffffff,transparent:true,opacity:0.35})));
+    // Ground track: the flight line's shadow on the terrain
+    const lift=Math.max(span*0.002,0.25);
+    G.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(cp.map(p=>new THREE.Vector3(p.x,gy(p.x,p.z)+lift,p.z))),new THREE.LineBasicMaterial({color:0xffffff,transparent:true,opacity:0.75})));
+    // Home and the highest point
+    const hy=gy(0,0),ring=(r,c,o)=>{const m=new THREE.Mesh(new THREE.RingGeometry(r*0.6,r,32),new THREE.MeshBasicMaterial({color:c,transparent:true,opacity:o,side:THREE.DoubleSide,depthWrite:false}));m.rotation.x=-Math.PI/2;return m;};
+    const hr=ring(lblS*0.9,0x4caf50,0.8);hr.position.set(0,hy+lift,0);G.add(hr);
+    const hl=labelSprite('H  Home',{border:'#4caf50',scale:0.032});hl.position.set(0,hy+lift*2,0);G.add(hl);
+    let top=path[0];for(const p of path)if(p.y>top.y)top=p;
+    const tl=labelSprite(`▲ ${top.y.toFixed(1)} m above home`+(terrain?` · ${(top.y-gy(top.x,top.z)).toFixed(0)} m AGL`:''),{border:'#d62728',scale:0.03});tl.position.set(top.x,top.y+tubeR*4,top.z);G.add(tl);
+    // Waypoints: pin, pole down to the ground, ring on the ground, numbered label with altitude, dashed planned route
+    const pinR=Math.max(span*0.008,0.35),wpLine=[];
+    for(const wp of wpPositions){
+      const g0=gy(wp.x,wp.z),pin=new THREE.Mesh(new THREE.SphereGeometry(pinR,12,12),new THREE.MeshStandardMaterial({color:0xffd54f,emissive:0x665500}));
+      pin.position.set(wp.x,wp.y,wp.z);G.add(pin);
+      const poleH=Math.max(wp.y-g0,pinR*2),pole=new THREE.Mesh(new THREE.CylinderGeometry(pinR*0.15,pinR*0.15,poleH,6),new THREE.MeshStandardMaterial({color:0xffd54f,transparent:true,opacity:0.6}));
+      pole.position.set(wp.x,wp.y-poleH/2,wp.z);G.add(pole);
+      const wr=ring(pinR*2.4,0xffd54f,0.55);wr.position.set(wp.x,g0+lift,wp.z);G.add(wr);
+      const wl=labelSprite(`WP ${wp.num}`+(wp.alt!=null?` · ${wp.alt.toFixed(0)} m${wp.absAlt?' MSL':''}`:''),{color:'#ffd54f',border:'#ffd54f',scale:0.028});
+      wl.position.set(wp.x,wp.y+pinR*2,wp.z);G.add(wl);
+      wpLine.push(new THREE.Vector3(wp.x,wp.y,wp.z));
     }
-    if (wpLinePts.length >= 2) {
-      const wpLineGeo = new THREE.BufferGeometry().setFromPoints(wpLinePts);
-      const wpLineMat = new THREE.LineDashedMaterial({ color: 0xffd54f, dashSize: span * 0.02, gapSize: span * 0.01, transparent: true, opacity: 0.6 });
-      const wpLine = new THREE.Line(wpLineGeo, wpLineMat);
-      wpLine.computeLineDistances();
-      scene.add(wpLine);
-    }
+    if(wpLine.length>=2){const l=new THREE.Line(new THREE.BufferGeometry().setFromPoints(wpLine),new THREE.LineDashedMaterial({color:0xffd54f,dashSize:span*0.02,gapSize:span*0.01,transparent:true,opacity:0.8}));l.computeLineDistances();G.add(l);}
+    // North / east arrows at home
+    const cLen=span*0.15,o=new THREE.Vector3(0,hy+lift*2,0);
+    G.add(new THREE.ArrowHelper(new THREE.Vector3(0,0,-1),o,cLen,0xff5252,cLen*0.15,cLen*0.08));
+    G.add(new THREE.ArrowHelper(new THREE.Vector3(1,0,0),o,cLen,0x7cb342,cLen*0.15,cLen*0.08));
+    const nl=labelSprite('N',{border:'#ff5252',scale:0.026});nl.position.set(0,hy+lift*2,-cLen*1.1);G.add(nl);
+    scene.add(G);groundLayer=G;
   }
 
-  const trailGeo=new THREE.BufferGeometry().setFromPoints(pts);
-  const trail=new THREE.Line(trailGeo,new THREE.LineBasicMaterial({color:0x4fc3f7,linewidth:2}));
-  trail.geometry.setDrawRange(0,1);scene.add(trail);
+  // Real-world terrain: elevation tiles + map imagery, loaded in the background (the grid shows meanwhile)
+  const styleSel=document.getElementById('terrainStyle'),attrEl=document.getElementById('terrainAttr');
+  const tbb={n:ll(0,ext.z0)[0],s:ll(0,ext.z1)[0],w:ll(ext.x0,0)[1],e:ll(ext.x1,0)[1]};
+  let elevP=null;const imgP={};
+  async function setTerrainStyle(style){
+    const me=threeState;
+    if(style==='off'||!TERRAIN_STYLES[style]){
+      if(terrain){scene.remove(terrain.mesh);disposeTree(terrain.mesh);terrain=null;}
+      grid.visible=true;groundAt=()=>flatY;buildGroundLayer();attrEl.textContent='';return;}
+    attrEl.textContent='Loading terrain…';
+    const S=TERRAIN_STYLES[style];
+    if(!elevP)elevP=loadElevation(tbb).catch(()=>null);
+    if(!imgP[style])imgP[style]=tileMosaic(S.url,tileZoom(tbb,S.maxZ,8),tbb).catch(()=>null);
+    const [elev,img]=await Promise.all([elevP,imgP[style]]);
+    if(threeState!==me||styleSel.value!==style)return;   // another log / style was picked meanwhile
+    const im=img&&img.ok?img:null;
+    if(!elev&&!im){attrEl.textContent='Terrain unavailable (offline?) — showing grid';return;}
+    const yRef=elev?elev.at(lat0,lon0):0;   // home (first GPS fix) sits on the ground
+    if(terrain){scene.remove(terrain.mesh);disposeTree(terrain.mesh);}
+    terrain=buildTerrainMesh(ext,ll,elev,yRef,im);
+    terrain.elevHome=elev?yRef:null;scene.add(terrain.mesh);grid.visible=false;
+    groundAt=terrain.groundAt;buildGroundLayer();
+    attrEl.textContent=[im?S.attr:'',elev?DEM_ATTR+` · home ${yRef.toFixed(0)} m MSL`:''].filter(Boolean).join(' · ');
+  }
+  styleSel.onchange=()=>setTerrainStyle(styleSel.value);
+  buildGroundLayer();
+  document.getElementById('flightLegend').innerHTML=
+    `<div><span class="dot" style="background:#4caf50"></span>Start / Home &nbsp;<span class="dot" style="background:#f44336"></span>End</div>`+
+    `<div><span class="dot" style="background:#ffd54f"></span>Waypoints${wpPositions.length?` (${wpPositions.length})`:' (none in log)'}</div>`+
+    `<div><span class="dot" style="background:#fff"></span>Ground track &amp; altitude curtain</div>`+
+    `<div class="alt-ramp"></div><div class="alt-ramp-lbl"><span>${Math.round(hLo)||0} m</span><span>Height above home</span><span>${Math.round(hHi)} m</span></div>`;
 
   // Samplers
   const gpsSmp=lerpSampler(gps),attSmp=lerpSampler(att),batSmp=lerpSampler(firstBattery(messages.BAT||messages.CURR||[]));
@@ -2250,7 +2628,9 @@ function render3D(messages) {
   threeState={scene,camera,renderer,controls,drone,trail,path,totalTime,sampleAt,sampleAtt,gpsSmp,attSmp,batSmp,ctunSmp,modeSmp,baroSmp,rcouSmp,gpsStart,syncTimeOffset,alt0,playing:false,currentTime:0,speed:2,lastFrame:performance.now(),syncDS,gcsMsgs,activeSyncPlot:'',showGcs:false,lastSyncUpdate:0,lastGcsIdx:-1};
 
   threeState.sticks=initSticks3D(messages);
-  window.addEventListener('resize',()=>threeState.sticks(null));
+  const stickResize=()=>threeState.sticks(null);
+  window.addEventListener('resize',stickResize);
+  setTerrainStyle(styleSel.value);
 
   const playBtn=document.getElementById('playBtn'),scrub=document.getElementById('scrub'),timeDisp=document.getElementById('timeDisplay'),speedSel=document.getElementById('speedSelect');
   const syncSel=document.getElementById('syncPlotSelect'),gcsCb=document.getElementById('showGcsOverlay');
@@ -2322,7 +2702,7 @@ function render3D(messages) {
     threeState.drone.rotation.set(a.pitch,-a.yaw,-a.roll,'YXZ');
     // Trail follows sample time, not fraction of points (GPS rate can vary / have gaps)
     let tlo=0,thi=linePts.length-1;while(tlo<thi){const m=(tlo+thi+1)>>1;if(linePts[m].t<=t)tlo=m;else thi=m-1;}
-    threeState.trail.geometry.setDrawRange(0,Math.max(2,tlo+1));
+    threeState.trail.geometry.setDrawRange(0,tlo*threeState.trail.userData.perSeg);
     timeDisp.textContent=`${t.toFixed(1)} / ${threeState.totalTime.toFixed(1)} s`;
     scrub.value=(t/threeState.totalTime)*1000;
 
@@ -2355,7 +2735,8 @@ function render3D(messages) {
 
   threeState.seekTo=t3=>{threeState.currentTime=Math.max(0,Math.min(threeState.totalTime,t3));threeState.playing=false;playBtn.innerHTML='&#9654;';threeState.lastSyncUpdate=0;threeState.lastGcsIdx=-2;updateDrone();};
   let lastCursorFollow=0;
-  function animate(){requestAnimationFrame(animate);const now=performance.now(),dt=(now-threeState.lastFrame)/1000;threeState.lastFrame=now;
+  let raf=0;
+  function animate(){raf=requestAnimationFrame(animate);const now=performance.now(),dt=(now-threeState.lastFrame)/1000;threeState.lastFrame=now;
     if(threeState.playing){threeState.currentTime+=dt*threeState.speed;if(threeState.currentTime>=threeState.totalTime){threeState.currentTime=threeState.totalTime;threeState.playing=false;playBtn.innerHTML='&#9654;';}threeState.ticking=true;updateDrone();threeState.ticking=false;
       // While playing, the shared cursor follows the drone (throttled; other tabs catch up when opened)
       if(cursorOn&&(now-lastCursorFollow>250||!threeState.playing)){lastCursorFollow=now;setCursor(threeState.currentTime+threeState.syncTimeOffset,{seek3d:false});}}
@@ -2364,6 +2745,7 @@ function render3D(messages) {
 
   const onResize=()=>{const w=canvas.clientWidth,h=canvas.clientHeight||540;if(!w||!h)return;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();};
   window.addEventListener('resize',onResize); setTimeout(onResize,100);
+  threeState.dispose=()=>{cancelAnimationFrame(raf);window.removeEventListener('resize',onResize);window.removeEventListener('resize',stickResize);controls.dispose();disposeTree(scene);renderer.dispose();renderer.forceContextLoss();};
 }
 
 // ============================================================================
@@ -2439,6 +2821,19 @@ const INFO_DATA = {
     body: `<p>Individual motor PWM outputs plotted against total battery current draw. Helps identify which motors draw more power and whether total current correlates with specific motor demands.</p>
     <p><span class="info-good">Good:</span> All motors draw roughly equal PWM for a given maneuver. Total current scales linearly with average motor output. No single motor consistently runs hotter than others.</p>
     <p><span class="info-bad">Bad:</span> One motor consistently at higher PWM than others suggests a mechanical issue (bent arm, bad bearing, unbalanced prop) or CG offset. Current spikes without corresponding motor demand could indicate electrical issues.</p>`
+  },
+  'bat-phase': {
+    title: 'Current by Flight Phase',
+    body: `<p><strong>Takeoff</strong> runs from the moment the throttle starts rising until the climb levels off (at least 1 m gained and climb rate under 25 cm/s, at most 20 s). Liftoff is ArduCopter's NOT_LANDED event; without it, a stretch of sustained throttle is used.</p>
+    <p><strong>Landing</strong> is the final descent: from the last time the drone was 3 m (or half its max height) above the touchdown height, to 1 s after LAND_COMPLETE_MAYBE.</p>
+    <p><strong>Steady flight</strong> is everything airborne in between. <strong>Extra current while yawing</strong> compares hard-yaw samples (&ge; 30 &deg;/s) with not-yawing samples (&lt; 10 &deg;/s) at the same collective throttle (CTUN.ThO, 2 % bins), so climbing and descending don't skew it.</p>
+    <p><span class="info-bad">Note:</span> BAT is often logged at only a few Hz, so short spikes can fall between samples and the true peak may be higher.</p>`
+  },
+  'bat-yaw': {
+    title: 'Current & Voltage vs Yaw Rate',
+    body: `<p>Each blue dot is one battery sample in steady flight, placed by how fast the drone was yawing (mean |yaw rate| over &plusmn;0.5 s). The red line is the mean current in each yaw-rate band, the green dotted line the mean voltage.</p>
+    <p>A multicopter yaws by speeding up the motors spinning one way and slowing the others, which costs extra power. Expect the red line to rise and the green to sag as the yaw rate goes up.</p>
+    <p><span class="info-bad">Check:</span> a steep rise means yaw authority is eating into the power margin. Gentler yaw inputs, or a lower PILOT_Y_RATE / ATC_ACCEL_Y_MAX, cut the spikes.</p>`
   },
   'gpsheat': {
     title: 'GPS Ground Track Heatmap',
@@ -2596,7 +2991,7 @@ function renderPIDPlots(m, t0) {
     if ('Tar' in raw[0]) traces.push({ x: t, y: field(ds, 'Tar'), name: 'Desired', line: { color: '#ffd54f', width: 1.5, dash: 'dot' } });
     if ('Act' in raw[0]) traces.push({ x: t, y: field(ds, 'Act'), name: 'Actual', line: { color: '#4fc3f7', width: 1.5 } });
     if ('Err' in raw[0]) traces.push({ x: t, y: field(ds, 'Err'), name: 'Error', line: { color: '#ff8a80', width: 1, dash: 'dash' } });
-    if (traces.length) plot(ax.chart, traces, { yaxis: { ...AXIS_STYLE, title: `${ax.label} rate` } });
+    if (traces.length) plot(ax.chart, traces, { yaxis: { ...AXIS_STYLE, title: `${ax.label} rate (rad/s)` } });
     else emptyChart(ax.chart, `${ax.msg} found but no Tar/Act fields`);
 
     const terms = [];
@@ -2634,10 +3029,10 @@ function renderEKFPlots(m, t0) {
     if ('IVN' in nkf3[0]) tr.push({ x: t, y: field(ds, 'IVN'), name: 'Vel N Innov', line: { color: '#4fc3f7', width: 1.2 } });
     if ('IVE' in nkf3[0]) tr.push({ x: t, y: field(ds, 'IVE'), name: 'Vel E Innov', line: { color: '#ff8a65', width: 1.2 } });
     if ('IVD' in nkf3[0]) tr.push({ x: t, y: field(ds, 'IVD'), name: 'Vel D Innov', line: { color: '#aed581', width: 1.2 } });
-    if ('IPN' in nkf3[0]) tr.push({ x: t, y: field(ds, 'IPN'), name: 'Pos N Innov', line: { color: '#ffd54f', width: 1.2 } });
-    if ('IPE' in nkf3[0]) tr.push({ x: t, y: field(ds, 'IPE'), name: 'Pos E Innov', line: { color: '#ba68c8', width: 1.2 } });
-    if ('IPD' in nkf3[0]) tr.push({ x: t, y: field(ds, 'IPD'), name: 'Pos D Innov', line: { color: '#4db6ac', width: 1.2 } });
-    if (tr.length) plot('chart-ekf-vp', tr, { yaxis: { ...AXIS_STYLE, title: 'm or m/s' } });
+    if ('IPN' in nkf3[0]) tr.push({ x: t, y: field(ds, 'IPN'), name: 'Pos N Innov', line: { color: '#ffd54f', width: 1.2 }, yaxis: 'y2' });
+    if ('IPE' in nkf3[0]) tr.push({ x: t, y: field(ds, 'IPE'), name: 'Pos E Innov', line: { color: '#ba68c8', width: 1.2 }, yaxis: 'y2' });
+    if ('IPD' in nkf3[0]) tr.push({ x: t, y: field(ds, 'IPD'), name: 'Pos D Innov', line: { color: '#4db6ac', width: 1.2 }, yaxis: 'y2' });
+    if (tr.length) plot('chart-ekf-vp', tr, { yaxis: { ...AXIS_STYLE, title: 'Velocity innovation (m/s)' }, yaxis2: { ...AXIS_STYLE, title: 'Position innovation (m)', overlaying: 'y', side: 'right' } });
     else emptyChart('chart-ekf-vp', 'XKF3 found but no innovation fields');
   } else if (nkf1.length) {
     const ds = downsample(nkf1), t = timeArray(ds, 'TimeUS', t0), tr2 = [];
@@ -2652,9 +3047,10 @@ function renderEKFPlots(m, t0) {
     const ds = downsample(nkf4), t = timeArray(ds, 'TimeUS', t0), tr = [];
     if ('errRP' in nkf4[0]) tr.push({ x: t, y: field(ds, 'errRP'), name: 'Roll/Pitch Error', line: { color: '#ff8a65', width: 1.3 } });
     if ('errY' in nkf4[0]) tr.push({ x: t, y: field(ds, 'errY'), name: 'Yaw Error', line: { color: '#4fc3f7', width: 1.3 } });
-    if ('OFN' in nkf4[0]) tr.push({ x: t, y: field(ds, 'OFN'), name: 'OF North', line: { color: '#aed581', width: 1 } });
-    if ('OFE' in nkf4[0]) tr.push({ x: t, y: field(ds, 'OFE'), name: 'OF East', line: { color: '#ffd54f', width: 1 } });
-    if (tr.length) plot('chart-ekf-att', tr, { yaxis: { ...AXIS_STYLE, title: 'Error (rad)' } });
+    if ('OFN' in nkf4[0]) tr.push({ x: t, y: field(ds, 'OFN'), name: 'OF North', line: { color: '#aed581', width: 1 }, yaxis: 'y2' });
+    if ('OFE' in nkf4[0]) tr.push({ x: t, y: field(ds, 'OFE'), name: 'OF East', line: { color: '#ffd54f', width: 1 }, yaxis: 'y2' });
+    const ofAx = tr.some(x => x.yaxis === 'y2') ? { yaxis2: { ...AXIS_STYLE, title: 'Optical flow (m)', overlaying: 'y', side: 'right' } } : {};
+    if (tr.length) plot('chart-ekf-att', tr, { yaxis: { ...AXIS_STYLE, title: 'Attitude error (unitless)' }, ...ofAx });
     else emptyChart('chart-ekf-att', 'No attitude error fields in NKF4');
   } else emptyChart('chart-ekf-att', 'No NKF4/XKF4');
 
@@ -2700,6 +3096,7 @@ function renderMotorBatPlots(m, t0) {
   if (!vK) { emptyChart('chart-mbat-sag', 'No voltage field'); emptyChart('chart-mbat-demand', ''); return; }
 
   const bSmp = lerpSampler(bat), ctSmp = lerpSampler(ctun), rcSmp = stepSampler(rcout);
+  const nMot = motorCount(m), [pm, pM] = motorRange(m);
   const ref = ctun.length ? ctun : rcout;
   const ds = downsample(ref, 8000), t = timeArray(ds, 'TimeUS', t0);
   const volts = [], throttle = [], curr = [];
@@ -2715,21 +3112,21 @@ function renderMotorBatPlots(m, t0) {
       const rc = rcSmp(tA);
       if (rc) {
         let avg = 0, cnt = 0;
-        for (let i = 1; i <= 6; i++) { const v = rc[`C${i}`]; if (v != null && v > 1000) { avg += (v - 1000) / 10; cnt++; } }
+        for (let i = 1; i <= nMot; i++) { const v = rc[`C${i}`]; if (v != null && v > pm) { avg += (v - pm) / (pM - pm) * 100; cnt++; } }
         throttle.push(cnt > 0 ? avg / cnt : null);
       } else throttle.push(null);
     }
   }
   const tr1 = [
     { x: t, y: volts, name: 'Voltage (V)', line: { color: '#4fc3f7', width: 1.5 } },
-    { x: t, y: throttle, name: 'Throttle %', line: { color: '#ffd54f', width: 1.3 }, yaxis: 'y2' }
+    { x: t, y: throttle, name: 'Throttle %', line: { color: '#ffd54f', width: 1.3 }, yaxis: 'y2', unit: null }
   ];
   if (cK && curr.some(c => c != null)) tr1.push({ x: t, y: curr, name: 'Current (A)', line: { color: '#ff8a65', width: 1, dash: 'dot' }, yaxis: 'y2' });
   plot('chart-mbat-sag', tr1, { yaxis: { ...AXIS_STYLE, title: 'Voltage (V)' }, yaxis2: { ...AXIS_STYLE, title: 'Throttle % / Current (A)', overlaying: 'y', side: 'right' } });
 
   const ds2 = downsample(rcout, 8000), t2 = timeArray(ds2, 'TimeUS', t0);
   const mTraces = [];
-  for (let i = 1; i <= 6; i++) {
+  for (let i = 1; i <= nMot; i++) {
     const k = `C${i}`;
     if (rcout[0][k] === undefined) continue;
     mTraces.push({ x: t2, y: field(ds2, k), name: motorLabel(i), line: { color: PAL[i - 1], width: 1.2, shape: 'hv' } });
@@ -2741,6 +3138,151 @@ function renderMotorBatPlots(m, t0) {
   }
   if (mTraces.length) plot('chart-mbat-demand', mTraces, { yaxis: { ...AXIS_STYLE, title: 'PWM (µs)' }, yaxis2: { ...AXIS_STYLE, title: 'Current (A)', overlaying: 'y', side: 'right' } });
   else emptyChart('chart-mbat-demand', 'No motor output data');
+}
+
+// ============================================================================
+// Current by flight phase: takeoff, landing and yawing vs steady flight
+// ============================================================================
+const YAW_HARD = 30, YAW_CALM = 10;   // °/s: "hard yaw" vs "not yawing"
+// Liftoff / touchdown from ArduCopter's NOT_LANDED (28) and LAND_COMPLETE_MAYBE / LAND_COMPLETE (17 / 18) events,
+// else from stretches of sustained throttle (CTUN.ThO > 0.1 for at least 3 s). Times are chart seconds.
+function batFlights(m, t0, ct) {
+  const tRel = x => ((x.TimeUS || 0) - t0) / 1e6, out = [];
+  const ev = (m.EV || []).map(e => ({ t: tRel(e), id: e.Id != null ? e.Id : e.Event })).sort((a, b) => a.t - b.t);
+  let up = null;
+  for (const e of ev) {
+    if (e.id === 28 && up == null) up = e.t;
+    else if ((e.id === 17 || e.id === 18 || e.id === 11) && up != null) { out.push([up, e.t]); up = null; }
+    // a landing before any takeoff: the log started in the air
+    else if ((e.id === 17 || e.id === 18) && up == null && !out.length && ct.length && ct.some(c => tRel(c) < e.t && c.ThO > 0.1)) out.push([tRel(ct[0]), e.t]);
+  }
+  if (up != null && ct.length) out.push([up, tRel(ct[ct.length - 1])]);
+  if (out.length || !ct.length) return out;
+  let s = null;
+  for (const c of ct) {
+    const t = tRel(c), on = c.ThO > 0.1;
+    if (on && s == null) s = t;
+    if (!on && s != null) { if (t - s >= 3) out.push([s, t]); s = null; }
+  }
+  if (s != null && tRel(ct[ct.length - 1]) - s >= 3) out.push([s, tRel(ct[ct.length - 1])]);
+  return out;
+}
+
+function renderBatPhases(m, t0) {
+  const box = document.getElementById('batPhase');
+  const bm = batteryModel(m, t0), ct = m.CTUN || [];
+  if (!bm || !bm.I.some(x => x != null)) {
+    box.innerHTML = '<div class="bat-empty">Needs battery current (BAT / CURR) in the log.</div>';
+    emptyChart('chart-bat-yaw', 'No battery current'); emptyChart('chart-bat-yawt', ''); return;
+  }
+  const { t, V, I } = bm, n = t.length, tRel = x => ((x.TimeUS || 0) - t0) / 1e6;
+  const ctT = ct.map(tRel), ctSmp = lerpSampler(ct), thrAt = tc => { const c = ctSmp(tc + t0 / 1e6); return c && c.ThO != null ? c.ThO : null; };
+
+  // Yaw rate (°/s) from whichever of RATE.Y / IMU.GyrZ is logged faster; each battery sample gets the mean |rate| over ±0.5 s
+  const rate = m.RATE || [], imu = m.IMU || [];
+  const useImu = imu.length > rate.length && imu.length && 'GyrZ' in imu[0];
+  const ysrc = useImu ? imu : rate, yT = ysrc.map(tRel), yV = ysrc.map(r => useImu ? r.GyrZ * 180 / Math.PI : r.Y);
+  const yawAbs = new Array(n).fill(null);
+  if (ysrc.length) for (let i = 0, j = 0; i < n; i++) {
+    while (j < yT.length && yT[j] < t[i] - 0.5) j++;
+    let s = 0, k = 0; for (let q = j; q < yT.length && yT[q] <= t[i] + 0.5; q++) if (isFinite(yV[q])) { s += Math.abs(yV[q]); k++; }
+    yawAbs[i] = k ? s / k : null;
+  }
+
+  // Altitude above the ground (CTUN.Alt is relative to home) and climb rate, for the takeoff / landing windows
+  const altAt = tc => { const c = ctSmp(tc + t0 / 1e6); return c && c.Alt != null ? c.Alt : null; };
+  const flights = batFlights(m, t0, ct);
+  const idx = (a, b) => { const o = []; for (let i = 0; i < n; i++) if (t[i] >= a && t[i] <= b) o.push(i); return o; };
+  const stats = (a, b) => {
+    const ii = idx(a, b).filter(i => I[i] != null); if (!ii.length) return null;
+    let pk = ii[0], vMin = null, sum = 0, mAh = 0;
+    for (const i of ii) { if (I[i] > I[pk]) pk = i; sum += I[i]; if (V[i] != null && V[i] > 1 && (vMin == null || V[i] < vMin)) vMin = V[i]; }
+    for (let k = 1; k < ii.length; k++) mAh += (I[ii[k]] + I[ii[k - 1]]) / 2 * (t[ii[k]] - t[ii[k - 1]]) / 3.6;
+    return { a, b, peak: I[pk], tPeak: t[pk], vPeak: V[pk], thrPeak: thrAt(t[pk]), avg: sum / ii.length, vMin, mAh, n: ii.length };
+  };
+  const phases = flights.map(([tUp, tDn]) => {
+    // Takeoff: from the throttle starting to rise until the climb levels off (≥ 1 m gained, climb < 25 cm/s), at most 20 s
+    let a = tUp; for (let k = ctT.length - 1; k >= 0; k--) if (ctT[k] <= tUp) { let q = k; while (q > 0 && ctT[q] > tUp - 10 && ct[q].ThO > 0.02) q--; a = ctT[q]; break; }
+    const g0 = altAt(a) || 0; let b = Math.min(tUp + 20, tDn), gained = false;
+    for (let k = 0; k < ct.length; k++) { if (ctT[k] <= tUp) continue; if (ctT[k] >= b) break;
+      if (ct[k].Alt - g0 >= 1) gained = true;
+      if (gained && ct[k].CRt != null && Math.abs(ct[k].CRt) < 25) { b = ctT[k]; break; } }
+    // Landing: the final descent, from the last time it was 3 m (or half its max height) above the touchdown height, to 1 s after touchdown
+    const g1 = altAt(tDn) || 0; let top = 0;
+    for (let k = 0; k < ct.length; k++) if (ctT[k] >= tUp && ctT[k] <= tDn) top = Math.max(top, ct[k].Alt - g1);
+    const thr = Math.min(3, Math.max(0.5, top / 2)); let la = Math.max(b, tDn - 30);
+    for (let k = ct.length - 1; k >= 0; k--) if (ctT[k] < tDn && ctT[k] >= la && ct[k].Alt - g1 >= thr) { la = ctT[k]; break; }
+    const to = stats(a, b), ld = stats(la, tDn + 1);
+    // Steady flight: airborne, outside both windows
+    const st = idx(tUp, tDn).filter(i => I[i] != null && t[i] > b && t[i] < la);
+    const steady = st.length ? st.reduce((s, i) => s + I[i], 0) / st.length : null;
+    return { tUp, tDn, to, ld, steady, top };
+  });
+
+  // Yaw: current while yawing hard vs not yawing at the same collective throttle (2 % bins), steady flight only
+  const inSteady = i => phases.some(p => p.to && p.ld && t[i] > p.to.b && t[i] < p.ld.a);
+  const bins = {}; let nHard = 0, hardPk = null, hardSum = 0, hardS = 0;
+  for (let i = 0; i < n; i++) {
+    if (I[i] == null || yawAbs[i] == null || !inSteady(i)) continue;
+    const th = thrAt(t[i]); if (th == null) continue;
+    const k = Math.round(th / 0.02), B = bins[k] = bins[k] || { h: [], c: [] };
+    if (yawAbs[i] >= YAW_HARD) { B.h.push(I[i]); nHard++; hardSum += I[i]; hardS += i + 1 < n ? Math.min(1, t[i + 1] - t[i]) : 0; if (hardPk == null || I[i] > I[hardPk]) hardPk = i; }
+    else if (yawAbs[i] < YAW_CALM) B.c.push(I[i]);
+  }
+  const avgA = a => a.reduce((s, x) => s + x, 0) / a.length;
+  let wSum = 0, dSum = 0, cRef = 0;
+  for (const B of Object.values(bins)) if (B.h.length && B.c.length >= 3) { const d = avgA(B.h) - avgA(B.c); dSum += d * B.h.length; cRef += avgA(B.c) * B.h.length; wSum += B.h.length; }
+  const yawExtra = wSum ? dSum / wSum : null, yawRef = wSum ? cRef / wSum : null;
+
+  // Number cards
+  const f = (v, d, u) => v == null || !isFinite(v) ? '—' : `${v.toFixed(d)}${u ? ' ' + u : ''}`;
+  const sg = v => v == null || !isFinite(v) ? '—' : `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(1)} A`;
+  const card = (k, v, s) => `<div class="spec"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s}</div></div>`;
+  let h = '';
+  if (!phases.length) h += '<div class="bat-empty">No takeoff found in this log (no NOT_LANDED event and no sustained throttle).</div>';
+  phases.forEach((p, fi) => {
+    const T = p.to, L = p.ld, vs = s => s && s.vMin != null ? ` · min ${f(s.vMin, 2, 'V')}` : '';
+    h += `<div class="bat-note" style="margin:10px 0 6px">Flight ${fi + 1}${phases.length > 1 ? ` of ${phases.length}` : ''} &middot; airborne T+${f(p.tUp, 0)}–${f(p.tDn, 0)} s (${f(p.tDn - p.tUp, 0)} s, ${f(p.top, 1)} m max)</div><div class="spec-grid">` +
+      card('Takeoff peak', f(T && T.peak, 1, 'A'), T ? `T+${f(T.tPeak, 1)} s · ${f(T.thrPeak != null ? T.thrPeak * 100 : null, 0, '%')} throttle · ${f(T.vPeak, 2, 'V')}` : 'no samples') +
+      card('Takeoff average', f(T && T.avg, 1, 'A'), T ? `${f(T.b - T.a, 1)} s window · ${f(T.mAh, 0, 'mAh')}${vs(T)}` : '') +
+      card('Steady flight average', f(p.steady, 1, 'A'), 'airborne, outside takeoff & landing') +
+      card('Landing peak', f(L && L.peak, 1, 'A'), L ? `T+${f(L.tPeak, 1)} s · ${f(L.thrPeak != null ? L.thrPeak * 100 : null, 0, '%')} throttle · ${f(L.vPeak, 2, 'V')}` : 'no samples') +
+      card('Landing average', f(L && L.avg, 1, 'A'), L ? `${f(L.b - L.a, 1)} s window · ${f(L.mAh, 0, 'mAh')}${vs(L)}` : '') +
+      card('Takeoff vs steady', sg(T && p.steady != null ? T.peak - p.steady : null), `peak above steady · landing ${sg(L && p.steady != null ? L.peak - p.steady : null)}`) +
+      '</div>';
+  });
+  h += `<div class="bat-note" style="margin:14px 0 6px">Yawing &middot; |yaw rate| from ${useImu ? 'IMU gyro Z' : 'RATE.Y'}, hard yaw &ge; ${YAW_HARD} &deg;/s, steady flight only</div><div class="spec-grid">` +
+    card('Extra current while yawing', sg(yawExtra), yawExtra != null ? `${f(yawRef ? yawExtra / yawRef * 100 : null, 0, '%')} more than at the same throttle without yaw` : 'not enough hard-yaw samples at matching throttle') +
+    card('Average while yawing', f(nHard ? hardSum / nHard : null, 1, 'A'), `≈ ${f(hardS, 1, 's')} of hard yaw (${nHard} samples)`) +
+    card('Peak while yawing', f(hardPk != null ? I[hardPk] : null, 1, 'A'), hardPk != null ? `T+${f(t[hardPk], 1)} s · ${f(yawAbs[hardPk], 0, '°/s')} · ${f(V[hardPk], 2, 'V')}` : '—') +
+    '</div>';
+  box.innerHTML = h;
+
+  // Current & voltage vs |yaw rate|: every steady-flight sample, plus the mean per yaw-rate band
+  const xs = [], ys = [], edges = [0, 5, 10, 20, 30, 45, 60, 90, 135, 1e9], bI = edges.slice(1).map(() => []), bV = edges.slice(1).map(() => []), bX = edges.slice(1).map(() => []);
+  for (let i = 0; i < n; i++) {
+    if (I[i] == null || yawAbs[i] == null || !inSteady(i)) continue;
+    xs.push(+yawAbs[i].toFixed(1)); ys.push(I[i]);
+    const k = edges.findIndex((e, j) => yawAbs[i] >= e && yawAbs[i] < edges[j + 1]);
+    bI[k].push(I[i]); bX[k].push(yawAbs[i]); if (V[i] != null && V[i] > 1) bV[k].push(V[i]);
+  }
+  if (xs.length) {
+    const keep = bI.map((a, k) => k).filter(k => bI[k].length);
+    const bandTxt = keep.map(k => `${edges[k]}–${edges[k + 1] > 1e8 ? '∞' : edges[k + 1]} °/s · ${bI[k].length} samples`);
+    plot('chart-bat-yaw', [
+      { x: xs, y: ys, name: 'Samples (A)', type: 'scatter', mode: 'markers', marker: { size: 4, color: '#1f77b4', opacity: 0.25 }, hovertemplate: '%{x:.0f} °/s · %{y:.1f} A<extra></extra>' },
+      { x: keep.map(k => avgA(bX[k])), y: keep.map(k => avgA(bI[k])), text: bandTxt, name: 'Mean current (A)', mode: 'lines+markers', line: { color: '#d62728', width: 2.2 }, marker: { size: 7 }, hovertemplate: '%{y:.1f} A<br>%{text}<extra></extra>' },
+      { x: keep.filter(k => bV[k].length).map(k => avgA(bX[k])), y: keep.filter(k => bV[k].length).map(k => avgA(bV[k])), name: 'Mean voltage (V)', mode: 'lines+markers', line: { color: '#2ca02c', width: 2, dash: 'dot' }, marker: { size: 6 }, yaxis: 'y2', hovertemplate: '%{y:.2f} V<extra></extra>' }
+    ], { _noEventMarkers: true, hovermode: 'closest', xaxis: { ...AXIS_STYLE, title: '|Yaw rate| (°/s)', rangeslider: { visible: false } },
+      yaxis: { ...AXIS_STYLE, title: 'Current (A)' }, yaxis2: { ...AXIS_STYLE, title: 'Voltage (V)', overlaying: 'y', side: 'right' }, margin: { l: 62, r: 62, t: 10, b: 50 } });
+  } else emptyChart('chart-bat-yaw', ysrc.length ? 'No steady-flight samples' : 'No RATE or IMU yaw rate in the log');
+
+  // Over time: current and signed yaw rate, with the takeoff / landing windows shaded
+  const di = downsample(t.map((_, i) => i)), tr = [{ x: di.map(i => t[i]), y: di.map(i => I[i]), name: 'Current (A)', line: { color: '#d62728', width: 1.5 } }];
+  if (ysrc.length) { const dy = downsample(yT.map((_, i) => i)); tr.push({ x: dy.map(i => yT[i]), y: dy.map(i => yV[i]), name: 'Yaw rate (°/s)', line: { color: '#1f77b4', width: 1 }, opacity: 0.8, yaxis: 'y2' }); }
+  const rect = (s, c) => s ? [{ type: 'rect', xref: 'x', yref: 'paper', x0: s.a, x1: s.b, y0: 0, y1: 1, fillcolor: c, line: { width: 0 }, layer: 'below' }] : [];
+  plot('chart-bat-yawt', tr, { yaxis: { ...AXIS_STYLE, title: 'Current (A)' }, yaxis2: { ...AXIS_STYLE, title: 'Yaw rate (°/s)', overlaying: 'y', side: 'right' },
+    shapes: phases.flatMap(p => rect(p.to, 'rgba(44,160,44,0.15)').concat(rect(p.ld, 'rgba(214,39,40,0.13)'))) });
 }
 
 // ============================================================================
@@ -2760,7 +3302,7 @@ function renderGPSHeatmap() {
       break;
     case 'altitude':
       const a0 = gps[0].Alt || 0;
-      vals = gps.map(g => (g.Alt || 0) - a0); cLabel = 'Alt AGL (m)';
+      vals = gps.map(g => (g.Alt || 0) - a0); cLabel = 'Height above first fix (m)';
       cScale = [[0, '#440154'], [0.25, '#31688e'], [0.5, '#35b779'], [0.75, '#fde725'], [1, '#fde725']];
       break;
     case 'hdop':
@@ -2787,7 +3329,7 @@ function renderGPSHeatmap() {
     marker: { size: 5, color: ds.map(i => vals[i]), colorscale: cScale, showscale: true, colorbar: { title: cLabel, titlefont: { color: '#a0522d', size: 11 }, tickfont: { color: '#333' }, bgcolor: 'rgba(0,0,0,0)', bordercolor: '#1f3326' } },
     hovertemplate: 'Lat: %{customdata[0]:.6f}<br>Lon: %{customdata[1]:.6f}<br>' + cLabel + ': %{marker.color:.2f}<extra></extra>'
   }], {
-    _noEventMarkers: true, hovermode: 'closest',
+    _noEventMarkers: true, _noUnits: true, hovermode: 'closest',
     xaxis: { ...AXIS_STYLE, title: 'East (m)', rangeslider: { visible: false } },
     yaxis: { ...AXIS_STYLE, title: 'North (m)', scaleanchor: 'x', scaleratio: 1 },
     margin: { l: 60, r: 20, t: 10, b: 45 }
@@ -2847,16 +3389,17 @@ function renderFFTPlots(m, t0) {
     let mean = 0;
     for (let i = 0; i < N; i++) mean += imu[startIdx + i][ax.field] || 0;
     mean /= N;
+    let wSum = 0;
     for (let i = 0; i < N; i++) {
       const w = 0.5 * (1 - Math.cos(2 * Math.PI * i / (N - 1)));
-      signal[i] = ((imu[startIdx + i][ax.field] || 0) - mean) * w;
+      signal[i] = ((imu[startIdx + i][ax.field] || 0) - mean) * w; wSum += w;
     }
     const result = fft(signal);
     const freqs = [], mag = [];
     const halfN = Math.floor(N / 2);
     for (let k = 1; k < halfN; k++) {
       freqs.push(k * fs / N);
-      mag.push(2 * Math.sqrt(result.re[k] ** 2 + result.im[k] ** 2) / N);
+      mag.push(2 * Math.sqrt(result.re[k] ** 2 + result.im[k] ** 2) / wSum);   // single-sided amplitude, window-corrected
     }
     fftTraces.push({ x: freqs, y: mag, name: ax.name, line: { color: ax.color, width: 1.3 } });
   }
@@ -2883,13 +3426,14 @@ function renderFFTPlots(m, t0) {
     let mn = 0;
     for (let i = 0; i < winSize; i++) mn += imu[offset + i].AccZ || 0;
     mn /= winSize;
+    let hwSum = 0;
     for (let i = 0; i < winSize; i++) {
       const hw = 0.5 * (1 - Math.cos(2 * Math.PI * i / (winSize - 1)));
-      sig[i] = ((imu[offset + i].AccZ || 0) - mn) * hw;
+      sig[i] = ((imu[offset + i].AccZ || 0) - mn) * hw; hwSum += hw;
     }
     const res = fft(sig);
     const row = [];
-    for (let k = 1; k <= usableFreqs; k++) row.push(20 * Math.log10(Math.max(1e-10, 2 * Math.sqrt(res.re[k] ** 2 + res.im[k] ** 2) / winSize)));
+    for (let k = 1; k <= usableFreqs; k++) row.push(20 * Math.log10(Math.max(1e-10, 2 * Math.sqrt(res.re[k] ** 2 + res.im[k] ** 2) / hwSum)));
     spectroData.push(row);
     timeAxis.push(((imu[offset].TimeUS || 0) - t0) / 1e6);
   }
@@ -2920,12 +3464,11 @@ function renderGeofence(m, t0) {
     return;
   }
 
-  let fenceRadius = null, fenceAltMax = null;
-  for (const p of parms) {
-    const n = p.Name || '';
-    if (n === 'FENCE_RADIUS') fenceRadius = p.Value;
-    if (n === 'FENCE_ALT_MAX') fenceAltMax = p.Value;
-  }
+  // FENCE_TYPE bits: 1 max altitude, 2 circle around home, 4 polygon, 8 min altitude. FENCE_RADIUS is always
+  // logged (default 300 m), so the circle only exists when its bit is set.
+  const fenceEnable = getParam(m, 'FENCE_ENABLE'), fenceType = getParam(m, 'FENCE_TYPE');
+  const fenceAltMax = getParam(m, 'FENCE_ALT_MAX'), fenceOff = fenceEnable === 0 ? ' (fence disabled: FENCE_ENABLE = 0)' : '';
+  const fenceRadius = fenceType == null || (fenceType & 2) ? getParam(m, 'FENCE_RADIUS') : null;
 
   const homeLat = gps[0].Lat, homeLng = gps[0].Lng;
   const container = document.getElementById('fenceMapContainer');
@@ -2945,17 +3488,31 @@ function renderGeofence(m, t0) {
     // getBounds() only works once the circle is on the map
     const fenceCircle = L.circle([homeLat, homeLng], {
       radius: fenceRadius, color: '#ff5252', weight: 2, dashArray: '8,6', fillColor: '#ff5252', fillOpacity: 0.04
-    }).addTo(fenceMap).bindPopup(`Cylindrical Fence: ${fenceRadius}m radius${fenceAltMax ? ', ' + fenceAltMax + 'm max alt' : ''}`);
+    }).addTo(fenceMap).bindPopup(`Cylindrical Fence: ${fenceRadius}m radius${fenceAltMax ? ', ' + fenceAltMax + 'm max alt' : ''}${fenceOff}`);
     fenceMap.fitBounds(fenceCircle.getBounds().pad(0.1));
   } else {
     fenceMap.fitBounds(L.latLngBounds(latlngs).pad(0.1));
   }
 
-  const fnce = m.FNCE || [];
-  if (fnce.length) {
-    const polyPts = fnce.filter(f => f.Lat && f.Lng && Math.abs(f.Lat) < 90).map(f => [f.Lat, f.Lng]);
-    if (polyPts.length >= 3) {
-      L.polygon(polyPts, { color: '#ba68c8', weight: 2, dashArray: '6,4', fillColor: '#ba68c8', fillOpacity: 0.06 }).addTo(fenceMap).bindPopup('Polygon Fence');
+  // FNCE items (AC_PolyFenceType): 98 inclusion polygon, 97 exclusion polygon (Count vertices each),
+  // 92 / 94 inclusion circle, 93 / 96 exclusion circle (Radius), 95 return point. The list is logged once per upload.
+  const fnce = (m.FNCE || []).filter(f => f.Lat && f.Lng && Math.abs(f.Lat) < 90), seenSeq = new Set(), items = [];
+  const bySeq = new Map(); fnce.forEach((f, i) => bySeq.set(f.Seq != null ? f.Seq : `i${i}`, f));   // later uploads overwrite
+  const tot = fnce.length ? fnce[fnce.length - 1].Tot : null;
+  for (const [k, f] of bySeq) if (tot == null || typeof k !== 'number' || k < tot) { seenSeq.add(k); items.push(f); }
+  items.sort((a, b) => (a.Seq || 0) - (b.Seq || 0));
+  for (let k = 0; k < items.length;) {
+    const f = items[k], ty = f.Type;
+    if (ty === 97 || ty === 98 || ty == null) {
+      const pts = [];   // consumes at least items[k] itself, so the loop always advances
+      while (k < items.length && items[k].Type === ty && pts.length < (f.Count || Infinity)) pts.push([items[k].Lat, items[k++].Lng]);
+      if (pts.length >= 3) { const inc = ty !== 97, c = inc ? '#ba68c8' : '#ff5252';
+        L.polygon(pts, { color: c, weight: 2, dashArray: '6,4', fillColor: c, fillOpacity: inc ? 0.06 : 0.15 }).addTo(fenceMap).bindPopup((inc ? 'Inclusion polygon fence' : 'Exclusion zone') + fenceOff); }
+    } else {
+      if ([92, 93, 94, 96].includes(ty) && f.Radius > 0) { const inc = ty === 92 || ty === 94, c = inc ? '#ba68c8' : '#ff5252';
+        L.circle([f.Lat, f.Lng], { radius: f.Radius, color: c, weight: 2, dashArray: '6,4', fillColor: c, fillOpacity: inc ? 0.04 : 0.15 }).addTo(fenceMap).bindPopup(`${inc ? 'Inclusion' : 'Exclusion'} circle, ${f.Radius} m${fenceOff}`); }
+      else if (ty === 95) L.circleMarker([f.Lat, f.Lng], { radius: 6, color: '#ffd54f', fillColor: '#ffd54f', fillOpacity: 0.9 }).addTo(fenceMap).bindPopup('Fence return point');
+      k++;
     }
   }
 
@@ -2975,9 +3532,10 @@ function renderGeofence(m, t0) {
       { x: t, y: pct, name: '% of Fence Radius', line: { color: '#ff8a65', width: 1.3 }, yaxis: 'y2' },
       { x: [t[0], t[t.length - 1]], y: [fenceRadius, fenceRadius], name: 'Fence Limit', mode: 'lines', line: { color: '#ff5252', width: 1.5, dash: 'dash' }, showlegend: true }
     ];
-    plot('chart-fence-prox', tr, { yaxis: { ...AXIS_STYLE, title: 'Distance (m)' }, yaxis2: { ...AXIS_STYLE, title: '% of Limit', overlaying: 'y', side: 'right' } });
+    plot('chart-fence-prox', tr, { yaxis: { ...AXIS_STYLE, title: 'Distance (m)' }, yaxis2: { ...AXIS_STYLE, title: '% of Limit', overlaying: 'y', side: 'right' },
+      annotations: fenceOff ? [{ xref: 'paper', yref: 'paper', x: 0.01, y: 0.98, xanchor: 'left', yanchor: 'top', text: 'FENCE_ENABLE = 0: fence not active', showarrow: false, font: { color: '#d62728', size: 11 } }] : [] });
   } else {
-    emptyChart('chart-fence-prox', 'No FENCE_RADIUS parameter — distance tracking unavailable');
+    emptyChart('chart-fence-prox', fenceType != null && !(fenceType & 2) ? `No circular fence (FENCE_TYPE = ${fenceType}) — distance-to-limit tracking needs the circle fence${fenceOff}` : 'No FENCE_RADIUS parameter — distance tracking unavailable');
   }
 }
 
@@ -3083,13 +3641,18 @@ function buildEventMarkers(m, t0) {
       if (txt.includes('disarm')) events.push({ t, type: 'disarm', label: 'DISARMED', severity: 'info' });
       else events.push({ t, type: 'arm', label: 'ARMED', severity: 'info' });
     }
-    if (txt.includes('failsafe') || txt.includes('fail safe')) events.push({ t, type: 'failsafe', label: 'FAILSAFE', severity: 'critical' });
+    // "PreArm: Radio failsafe on" is a pre-arm check, and "... failsafe cleared" is the end of one, not a new failsafe
+    if ((txt.includes('failsafe') || txt.includes('fail safe')) && !/^(pre-?arm|arm):/.test(txt)) {
+      if (/clear|resolved|recovered/.test(txt)) events.push({ t, type: 'error', label: 'Failsafe cleared', severity: 'info' });
+      // the text usually repeats an ERR failsafe logged at the same moment; only count it when there's no ERR one
+      else if (!events.some(e => e.type === 'failsafe' && Math.abs(e.t - t) < 1.5)) events.push({ t, type: 'failsafe', label: 'FAILSAFE', severity: 'critical' });
+    }
     if (txt.includes('ekf') && (txt.includes('switch') || txt.includes('reset') || txt.includes('lane'))) events.push({ t, type: 'error', label: 'EKF_RESET', severity: 'warn' });
   }
 
   const seen = new Set();
   const deduped = events.filter(e => {
-    const key = `${e.type}_${e.t.toFixed(1)}`;
+    const key = `${e.type}_${e.label}_${e.t.toFixed(1)}`;   // two different failsafes in the same 0.1 s both count
     if (seen.has(key)) return false;
     seen.add(key); return true;
   }).sort((a, b) => a.t - b.t);
@@ -3340,11 +3903,16 @@ function initCustomPlot() {
   cpTypes = Object.keys(rawMessages).filter(t => { const a = rawMessages[t]; return a.length >= 2 && 'TimeUS' in a[0] && cpMsgInfo(t).fields.length; }).sort();
   let saved = null;
   try { saved = localStorage.getItem(CP_STORE); cpSeries = JSON.parse(saved || '[]'); } catch (e) { cpSeries = []; }
-  // Restore saved series that exist in this log
-  cpSeries = cpSeries.filter(s => cpTypes.includes(s.msg) && cpHas(s.msg, s.field));
+  // Restore saved series that exist in this log (anything malformed or from an older version is dropped / defaulted)
+  if (!Array.isArray(cpSeries)) cpSeries = [];
+  cpSeries = cpSeries.filter(s => s && typeof s.msg === 'string' && typeof s.field === 'string' && cpTypes.includes(s.msg) && cpHas(s.msg, s.field));
   cpSeries.forEach(s => {
-    if (cpMsgInfo(s.msg).insts.length < 2) s.inst = null;
-    else if (s.inst != null && s.inst !== 'all') cpInstSel[s.msg] = String(s.inst);
+    if (!(typeof s.scale === 'number' && isFinite(s.scale) && s.scale !== 0)) s.scale = 1;
+    if (s.axis !== 'y2') s.axis = 'y';
+    const insts = cpMsgInfo(s.msg).insts;
+    if (insts.length < 2) s.inst = null;
+    else if (s.inst !== 'all' && !insts.some(v => String(v) === String(s.inst))) s.inst = String(insts[0]);   // that sensor isn't in this log
+    if (s.inst != null && s.inst !== 'all') cpInstSel[s.msg] = String(s.inst);
     cpOpen.add(s.msg);
   });
   cpFillPresets();
@@ -3367,7 +3935,8 @@ function cpRenderTree() {
       (nSel ? `<span class="cp-nsel" title="${nSel} plotted">${nSel}</span>` : '') + `<span class="cp-count">${rawMessages[t].length.toLocaleString()}</span></div>`;
     if (open) h += '<div class="cp-fields">' + fields.map(k => {
       const i = cpSeries.findIndex(s => cpSame(s, t, k, inst));
-      return `<label><input type="checkbox" data-cp-field="${escAttr(k)}"${i >= 0 ? ' checked' : ''}>${escHtml(k)}${i >= 0 ? `<span class="cp-sw" style="background:${cpColor(i)}${cpSeries[i].on === false ? ';opacity:0.3' : ''}"></span>` : ''}</label>`;
+      const u = cpUnitShown(t, k);
+      return `<label><input type="checkbox" data-cp-field="${escAttr(k)}"${i >= 0 ? ' checked' : ''}>${escHtml(k)}${u ? ` <span class="cp-unit">(${escHtml(u)})</span>` : ''}${i >= 0 ? `<span class="cp-sw" style="background:${cpColor(i)}${cpSeries[i].on === false ? ';opacity:0.3' : ''}"></span>` : ''}</label>`;
     }).join('') + '</div>';
     h += '</div>';
   }
@@ -3395,6 +3964,11 @@ function cpFillPresets() {
     CP_PRESETS.map(([n, list], i) => list.some(([t, k]) => cpHas(t, k)) ? `<option value="${i}">${escHtml(n)}</option>` : '').join('');
 }
 
+// Unit of a field as held in memory, and as shown (Lat/Lng appear as the log's degE7, like the ArduPilot viewer)
+const cpUnit = (msg, field) => (logUnits[msg] || {})[field] || '';
+const cpUnitShown = (msg, field) => { const u = cpUnit(msg, field), fi = unitInfo(u); return fi && UNIT_FAMILIES[fi.fam].asLogged || u; };
+// Name with its unit, while the series isn't rescaled (a ×scale breaks the unit)
+function cpLabel(s, u) { const n = cpSeriesName(s); return u && s.scale === 1 ? `${n} (${u})` : n; }
 function cpSeriesName(s) {
   return `${s.msg}.${s.field}${s.inst != null && s.inst !== 'all' ? `[${s.inst}]` : ''}${s.scale !== 1 ? ` ×${s.scale}` : ''}`;
 }
@@ -3411,24 +3985,29 @@ function renderCustomPlot() {
     `<button class="cp-axbtn" data-cp-axis="${i}" title="Move to the ${s.axis === 'y2' ? 'left' : 'right'} axis">${s.axis === 'y2' ? 'R' : 'L'}</button><button title="Remove" data-cp-remove="${i}">&times;</button></span>`).join('');
   if (!cpSeries.length) { emptyChart('chart-custom', 'Tick fields in the message list (or pick a preset) to plot them together.'); return; }
   const el = cpEl('chart-custom');
-  const traces = cpSeries.map((s, i) => {
-    let msgs = rawMessages[s.msg] || [];
-    const ik = cpInstanceField(msgs);
-    if (ik && s.inst != null && s.inst !== 'all') msgs = msgs.filter(m => String(m[ik]) === String(s.inst));
-    const ds = downsample(msgs), c = cpColor(i);
-    const tr = { x: timeArray(ds, 'TimeUS', globalT0), y: ds.map(m => { const v = m[s.field]; return typeof v === 'number' && isFinite(v) ? v * s.scale : null; }),
-      name: cpSeriesName(s), yaxis: s.axis, visible: s.on === false ? 'legendonly' : true };
-    if (s.style === 'markers') { tr.mode = 'markers'; tr.marker = { color: c, size: 3 }; }
-    else tr.line = { color: c, width: 1.3, shape: s.style === 'hv' ? 'hv' : 'linear' };
-    return tr;
+  const DASH = ['solid', 'dot', 'dash', 'longdash', 'dashdot', 'longdashdot'];
+  const traces = cpSeries.flatMap((s, i) => {
+    const all = rawMessages[s.msg] || [], ik = cpInstanceField(all), c = cpColor(i);
+    const groups = !ik || s.inst == null ? [[null, all]]
+      : s.inst === 'all' ? cpMsgInfo(s.msg).insts.map(v => [v, all.filter(m => m[ik] === v)])
+      : [[s.inst, all.filter(m => String(m[ik]) === String(s.inst))]];
+    return groups.map(([inst, msgs], gi) => {
+      const ds = downsample(msgs), lbl = cpLabel(s, cpUnit(s.msg, s.field));
+      const tr = { x: timeArray(ds, 'TimeUS', globalT0), y: ds.map(m => { const v = m[s.field]; return typeof v === 'number' && isFinite(v) ? v * s.scale : null; }),
+        name: s.inst === 'all' ? lbl.replace(`${s.msg}.${s.field}`, `${s.msg}.${s.field}[${inst}]`) : lbl, yaxis: s.axis, visible: s.on === false ? 'legendonly' : true, _si: i };
+      tr.unit = (s.scale === 1 && cpUnit(s.msg, s.field)) || null; tr._lng = /^(Lng|Lon)/.test(s.field);
+      if (s.style === 'markers') { tr.mode = 'markers'; tr.marker = { color: c, size: 3, symbol: gi ? ['circle', 'x', 'diamond', 'square'][gi % 4] : 'circle' }; }
+      else tr.line = { color: c, width: 1.3, shape: s.style === 'hv' ? 'hv' : 'linear', dash: DASH[gi % DASH.length] };
+      return tr;
+    });
   });
-  const axTitle = ax => cpSeries.filter(s => (s.axis === 'y2') === (ax === 'y2')).map(cpSeriesName).slice(0, 3).join(', ');
+  const axTitle = ax => cpSeries.filter(s => (s.axis === 'y2') === (ax === 'y2')).map(s => cpLabel(s, cpUnit(s.msg, s.field))).slice(0, 3).join(', ');
   const extra = { yaxis: { ...AXIS_STYLE, title: axTitle('y') } };
   if (cpSeries.some(s => s.axis === 'y2')) extra.yaxis2 = { ...AXIS_STYLE, title: axTitle('y2'), overlaying: 'y', side: 'right' };
   plot('chart-custom', traces, extra);
   // Clicking a legend entry flips the same show / hide checkbox
   if (el.removeAllListeners) el.removeAllListeners('plotly_legendclick');
-  el.on('plotly_legendclick', d => { const s = cpSeries[d.curveNumber]; if (s) { s.on = s.on === false; cpChanged(); } return false; });
+  el.on('plotly_legendclick', d => { const s = cpSeries[(el.data[d.curveNumber] || {})._si]; if (s) { s.on = s.on === false; cpChanged(); } return false; });
 }
 
 cpEl('cpFilter').addEventListener('input', cpRenderTree);
@@ -3492,9 +4071,9 @@ const PARM_CHECKS = [
   ]},
   { cat: 'EKF / Navigation', checks: [
     { name: 'AHRS_EKF_TYPE', min: 3, max: 3, desc: 'EKF type', warnMsg: 'Not using EKF3 (value 3). EKF3 is recommended for ArduCopter 4.0+.' },
-    { name: 'EK3_SRC1_POSXY', min: 1, max: 3, desc: 'EKF3 position source', warnMsg: 'Unusual position source.' },
-    { name: 'EK3_SRC1_VELXY', min: 1, max: 3, desc: 'EKF3 velocity source', warnMsg: 'Unusual velocity source.' },
-    { name: 'EK3_SRC1_POSZ', min: 1, max: 3, desc: 'EKF3 altitude source', warnMsg: 'Unusual altitude source.' },
+    { name: 'EK3_SRC1_POSXY', allowed: [3, 4, 6], desc: 'EKF3 position source', warnMsg: 'Not GPS (3), Beacon (4) or ExternalNav (6).' },
+    { name: 'EK3_SRC1_VELXY', allowed: [3, 4, 5, 6, 7], desc: 'EKF3 velocity source', warnMsg: 'Not GPS (3), Beacon (4), OpticalFlow (5), ExternalNav (6) or WheelEncoder (7).' },
+    { name: 'EK3_SRC1_POSZ', allowed: [1, 2, 3, 4, 6], desc: 'EKF3 altitude source', warnMsg: 'Not Baro (1), RangeFinder (2), GPS (3), Beacon (4) or ExternalNav (6).' },
     { name: 'GPS_TYPE', min: 1, max: null, desc: 'GPS type', warnMsg: 'GPS disabled (0). No GPS navigation possible.' },
   ]},
   { cat: 'Compass / IMU', checks: [
@@ -3548,8 +4127,11 @@ function renderDiagnostics(m) {
         status = 'N/A'; statusClass = ''; note = 'Not found in log'; naCount++;
       } else {
         let fail = false;
-        if (chk.min != null && val < chk.min) fail = true;
-        if (chk.max != null && val > chk.max) fail = true;
+        // Parameters are float32 in the log (0.01 is stored as 0.0099999998), so allow for rounding at the limits
+        const tol = x => Math.max(1e-6, Math.abs(x) * 1e-6);
+        if (chk.min != null && val < chk.min - tol(chk.min)) fail = true;
+        if (chk.max != null && val > chk.max + tol(chk.max)) fail = true;
+        if (chk.allowed && !chk.allowed.includes(Math.round(val))) fail = true;
         if (fail && chk.warnMsg) {
           const isBad = chk.name === 'ARMING_CHECK' || chk.name === 'BATT_FS_LOW_ACT' || chk.name === 'GPS_TYPE' || chk.name === 'COMPASS_USE';
           if (isBad) { status = 'FAIL'; statusClass = 'diag-bad'; badCount++; }
@@ -3584,12 +4166,13 @@ function renderDiagnostics(m) {
 const PAGES = ['home', 'viewer', 'tx', 'battery', 'schematic'];
 let currentPage = 'home';
 function showPage(name) {
-  if (!PAGES.includes(name)) name = 'home';
+  const valid = PAGES.includes(name);
+  if (!valid) name = 'home';
   const changed = name !== currentPage;
   currentPage = name;
   document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.id === `page-${name}`));
   document.querySelectorAll('#siteNav a').forEach(a => a.classList.toggle('active', a.dataset.page === name));
-  if (location.hash !== `#${name}`) history[location.hash ? 'pushState' : 'replaceState'](null, '', `#${name}`);
+  if (location.hash !== `#${name}`) history[location.hash && valid ? 'pushState' : 'replaceState'](null, '', `#${name}`);
   if (changed) window.scrollTo(0, 0);
   // Plotly sizes charts that were drawn while hidden at a default width; fix them once visible
   setTimeout(() => {
@@ -3707,10 +4290,11 @@ const PACK = { S: 6, P: 9, cellFull: 4.2, cellCut: 2.5, cellNom: 3.6, cellCapmAh
 PACK.capmAh = PACK.cellCapmAh * PACK.P;                                  // 40 500 mAh
 PACK.capWh = PACK.cellCapmAh / 1000 * PACK.cellNom * PACK.S * PACK.P;    // 874.8 Wh
 PACK.Rdefault = PACK.cellR * PACK.S / PACK.P;                            // 10 mΩ: 6 in series, 9 in parallel
-// P45B open-circuit (rested) voltage → state of charge, from low-rate discharge to the 2.50 V cutoff.
+// P45B open-circuit (rested) voltage → state of charge, traced from the 0.2C (0.9 A) discharge curve on Molicel's
+// INR-21700-P45B datasheet (4.2 V → 2.5 V at 23 °C), plus the 0.9 A × 15 mΩ drop so it reads as rested voltage.
 // Only valid for a rested cell; under load use the IR-compensated voltage (V + I·R) instead.
-const SOC_CURVE = [[2.50, 0], [3.00, 1], [3.20, 3], [3.30, 6], [3.40, 10], [3.46, 15], [3.51, 20], [3.55, 25], [3.59, 30], [3.62, 35],
-  [3.65, 40], [3.69, 45], [3.73, 50], [3.77, 55], [3.81, 60], [3.85, 65], [3.89, 70], [3.93, 75], [3.97, 80], [4.02, 85], [4.07, 90], [4.12, 95], [4.20, 100]];
+const SOC_CURVE = [[2.50, 0], [2.74, 1], [2.88, 3], [3.02, 6], [3.15, 10], [3.27, 15], [3.38, 20], [3.46, 25], [3.51, 30], [3.57, 35],
+  [3.62, 40], [3.67, 45], [3.72, 50], [3.77, 55], [3.82, 60], [3.85, 65], [3.90, 70], [3.96, 75], [4.02, 80], [4.06, 85], [4.08, 90], [4.105, 95], [4.20, 100]];
 function socFromCell(v) {
   if (v == null || !isFinite(v)) return null;
   if (v <= SOC_CURVE[0][0]) return 0;
@@ -3772,11 +4356,13 @@ function batteryModel(m, t0) {
         : wh[i - 1] + ((P[i] || 0) + (P[i - 1] || 0)) / 2 * dt / 3600;              // W·s → Wh
     }
 
-    // 3. Start SoC: low-current samples (< 0.5 A per pack) before arming / the first 60 s
+    // 3. Start SoC: rested samples (< 0.5 A per pack) before the first arming or the first real load, whichever is
+    //    first (a log can start armed with no ARMED event, and right after a flight the voltage is still recovering)
     const armEv = (m.EV || []).find(e => (e.Id != null ? e.Id : e.Event) === 10);
-    const tArm = armEv ? ((armEv.TimeUS || 0) - t0) / 1e6 : t[0] + 60;
+    const loadI = I.findIndex(x => x != null && x >= 0.5 * PACK.P);
+    const tRest = Math.min(armEv ? ((armEv.TimeUS || 0) - t0) / 1e6 : Infinity, loadI >= 0 ? t[loadI] : Infinity, t[0] + 600);
     const rest = [];
-    for (let i = 0; i < n && t[i] <= tArm; i++) if (ocv[i] != null && V[i] > 5 && Math.abs(I[i] || 0) < 0.5 * PACK.P) rest.push(ocv[i]);
+    for (let i = 0; i < n && t[i] < tRest; i++) if (ocv[i] != null && V[i] > 5 && Math.abs(I[i] || 0) < 0.5 * PACK.P) rest.push(ocv[i]);
     const firstOk = ocv.findIndex((o, i) => o != null && V[i] > 5);
     const ocv0 = rest.length ? rest.reduce((a, b) => a + b, 0) / rest.length : (firstOk >= 0 ? ocv[firstOk] : null);
     const soc0 = socFromCell(ocv0);
@@ -3910,7 +4496,7 @@ function drawBankSchematic(v, i, p) {
       <div><div class="k">Current</div><div class="v pk-i">—</div></div>
       <div><div class="k">Power</div><div class="v pk-p">—</div></div>
       <div><div class="k">Voltage</div><div class="v pk-v">—</div></div>
-      <div><div class="k">Energy used</div><div class="v pk-e">—</div></div>
+      <div><div class="k">Charge used</div><div class="v pk-e">—</div></div>
       <div class="pack-cells"><div class="k">Cells &middot; 6S1P &middot; 6 &times; P45B</div><div class="pc-row">${'<span class="pc">—</span>'.repeat(6)}</div></div>
       <div class="pack-load"><div class="k">Load vs 45 A rating</div><div class="bar"><div></div></div><div class="lbl"><span class="pk-l">—</span><span>45 A</span></div></div>
     </div></div>`;
@@ -3939,9 +4525,11 @@ function renderBatteryPage(m, t0) {
   const mean = a => { const o = ok(a); return o.length ? o.reduce((s, x) => s + x, 0) / o.length : null; };
   const vOk = ok(V).filter(v => v > 1), iOk = ok(I), pOk = ok(P);
   const last = bm.n - 1;
+  let iVmin = -1; for (let k = 0; k < bm.n; k++) if (V[k] != null && V[k] > 1 && (iVmin < 0 || V[k] < V[iVmin])) iVmin = k;
   batState = { ...bm, time: t[0],
     stats: { vMin: vOk.length ? arrMin(vOk) : null, vMax: vOk.length ? arrMax(vOk) : null, vAvg: mean(vOk),
-             iAvg: mean(iOk), iMax: iOk.length ? arrMax(iOk) : null, pAvg: mean(pOk), pMax: pOk.length ? arrMax(pOk) : null } };
+             iAvg: mean(iOk), iMax: iOk.length ? arrMax(iOk) : null, pAvg: mean(pOk), pMax: pOk.length ? arrMax(pOk) : null,
+             iAtVmin: iVmin >= 0 ? I[iVmin] : null } };
   batState.final = { soc: bm.soc[last], fcPct: bm.fcPct ? bm.fcPct[last] : null, used: bm.used[last], wh: bm.wh[last], v: V[last], ocv: bm.ocv[last] };
   scrub.disabled = false;
   document.getElementById('batCapR').textContent = `${bm.n.toLocaleString()} samples · ${(t[last] - t[0]).toFixed(0)} s · R_pack ${(bm.R * 1000).toFixed(1)} mΩ${bm.Rfit != null && bm.R === bm.Rfit ? ' (fitted)' : ' (datasheet)'}`;
@@ -3969,7 +4557,8 @@ function updateBatteryView() {
     v = avg ? S.vAvg : S.vMin; i = avg ? S.iAvg : S.iMax; p = avg ? S.pAvg : S.pMax;
     soc = F.soc; usedmAh = F.used; usedWh = F.wh; fcPct = F.fcPct;
   }
-  const cellV = v != null ? v / PACK.S : null, ocvCell = v != null ? (v + (i || 0) * batState.R) / PACK.S : null;
+  const iR = batMode === 'peak' ? S.iAtVmin : i;   // peak view: rest voltage from the current at the min-voltage moment
+  const cellV = v != null ? v / PACK.S : null, ocvCell = v != null ? (v + (iR || 0) * batState.R) / PACK.S : null;
   let socSrc = batState.soc0 != null ? `start ${f(batState.soc0, 0)}% at ${f(batState.ocv0, 3)} V/cell rested − charge used` : 'no valid voltage';
   if (fcPct != null) socSrc += ` · FC RemPct ${f(fcPct, 0)}%`;
   document.getElementById('batTime').textContent = batMode === 'time' ? `T = ${batState.time.toFixed(1)} s` : (batMode === 'avg' ? 'Whole-flight average' : 'Peak load (min V)');
@@ -4032,7 +4621,7 @@ function haversine(a, b) {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 function modeName(n) { return COPTER_MODES[n] !== undefined ? COPTER_MODES[n] : `Mode ${n}`; }
-function fmtClock(s) { if (s == null || !isFinite(s)) return '—'; const mm = Math.floor(s / 60), ss = Math.round(s - mm * 60); return `${mm}:${String(ss).padStart(2, '0')}`; }
+function fmtClock(s) { if (s == null || !isFinite(s)) return '—'; const r = Math.round(s), mm = Math.floor(r / 60), ss = r % 60; return `${mm}:${String(ss).padStart(2, '0')}`; }
 function downloadBlob(blob, name) { const u = URL.createObjectURL(blob), a = document.createElement('a'); a.href = u; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(u), 1000); }
 function logBaseName() { return (currentFileName || 'flight').replace(/\.[^.]+$/, '').replace(/[^\w.-]+/g, '_'); }
 
@@ -4043,6 +4632,9 @@ function flightFacts(m, t0) {
   const tEnd = ends.length ? Math.max(...ends) : 0;
   // Armed intervals from ARMED / DISARMED events; a log that ends armed closes at the last sample
   const armed = []; let on = null;
+  // A log that starts already armed: its first arm/disarm event is a DISARM, so the armed stretch began at log start
+  const firstAD = ev.find(e => e.type === 'arm' || e.type === 'disarm');
+  if (firstAD && firstAD.type === 'disarm') on = 0;
   for (const e of ev) {
     if (e.type === 'arm' && on == null) on = e.t;
     else if (e.type === 'disarm' && on != null) { armed.push([on, e.t]); on = null; }
@@ -4059,10 +4651,12 @@ function flightFacts(m, t0) {
     const tl = armed.length ? armed[armed.length - 1][1] : tRel(gps[gps.length - 1]);
     let li = gps.length - 1; while (li > 0 && tRel(gps[li]) > tl) li--;
     F.land = gps[li];
-    let dist = 0, iA = 0, iS = 0;
+    // Distance, max altitude and max speed while armed only (GPS wander on the ground or being carried doesn't count)
+    let dist = 0, iA = hi, iS = hi;
     for (let i = 1; i < gps.length; i++) {
+      if (!inArmed(tRel(gps[i]))) continue;
       const d = haversine(gps[i - 1], gps[i]);
-      if (d < 100) dist += d; // skip GPS glitch jumps
+      if (d < 100 && inArmed(tRel(gps[i - 1]))) dist += d; // skip GPS glitch jumps
       if ((gps[i].Alt || 0) > (gps[iA].Alt || 0)) iA = i;
       if ((gps[i].Spd || 0) > (gps[iS].Spd || 0)) iS = i;
     }
@@ -4288,7 +4882,10 @@ function reportData(m, t0) {
       iAvg: mean(nums(bm.I.filter((x, i) => F.inArmed(bm.t[i])))), iMax: is.length ? arrMax(is) : null,
       pMax: ps.length ? arrMax(ps) : null, fcEnd: bm.fcPct ? bm.fcPct[n - 1] : null };
     R.bat.packPeak = R.bat.iMax != null ? R.bat.iMax / PACK.P : null;
-    if (F.armedS > 0 && R.bat.used > 0) R.bat.mAhPerMin = R.bat.used / (F.armedS / 60);
+    // Charge per armed minute: only the charge drawn while armed (not bench time with the companion computer on)
+    const usedAt = tt => { let k = 0; while (k < n - 1 && bm.t[k + 1] <= tt) k++; return bm.used[k]; };
+    const armedUsed = F.armed.reduce((sum, [a, b]) => sum + usedAt(b) - usedAt(a), 0);
+    if (F.armedS > 0 && armedUsed > 0) R.bat.mAhPerMin = armedUsed / (F.armedS / 60);
   }
 
   // Motors (RCOU) — only samples where the motors are actually spinning
@@ -4816,9 +5413,10 @@ function txAutoAlign() {
   // Stretches where nothing moves match at many offsets; among near-ties prefer the one the clocks agree with
   const clk = txClockOffset(); let pick = best;
   if (clk != null) { const tol = Math.max(2, best[1] * 0.1); for (const c of cands) if (c[1] <= best[1] + tol && Math.abs(c[0] - clk) < Math.abs(pick[0] - clk)) pick = c; }
-  let fine = { off: pick[0], c: pick[1] };
+  // Refine on all samples; start from the full-sample cost so the comparison is like for like
+  const r0 = cost(pick[0], all); let fine = { off: pick[0], c: r0.cnt ? r0.c : Infinity };
   for (let off = pick[0] - 1; off <= pick[0] + 1 + 1e-9; off += G) { const r = cost(off, all); if (r.cnt && r.c < fine.c) fine = { off, c: r.c }; }
-  return { off: +fine.off.toFixed(2), cost: fine.c, chans: chans.length };
+  return { off: +fine.off.toFixed(2), cost: isFinite(fine.c) ? fine.c : pick[1], chans: chans.length };
 }
 function txDoAlign(mode) {
   txFc = parsedMessages ? txFcPrep(parsedMessages, globalT0) : null; txAlign = null;
@@ -4855,18 +5453,18 @@ function renderTxAll() {
 
 function renderTxSummary() {
   const L = txLog, tEnd = L.t[L.n - 1], tiles = [];
-  const tile = (k, v, u = '') => tiles.push(`<div class="stat"><div class="stat-label">${k}</div><div class="stat-value">${v}${u ? `<span class="stat-unit">${u}</span>` : ''}</div></div>`);
+  const tile = (k, v, u = '') => tiles.push(`<div class="stat"><div class="stat-label">${escHtml(k)}</div><div class="stat-value">${escHtml(v)}${u ? `<span class="stat-unit">${escHtml(u)}</span>` : ''}</div></div>`);
   const fin = a => Array.from(a).filter(Number.isFinite);
   const d0 = new Date(L.abs0);
-  tile('Log start', L.dated ? `${d0.toLocaleDateString()} ${d0.toLocaleTimeString()}` : d0.toLocaleTimeString());
+  tile('Log start', L.dated ? `${d0.toLocaleDateString()} ${d0.toLocaleTimeString()}` : d0.toLocaleTimeString([], { timeZone: 'UTC' }));   // no date column: abs is just the time of day
   tile('Duration', fmtClock(tEnd), 'min:s');
   tile('Samples', L.n, `@ ${(1 / (L.dt || 0.25)).toFixed(1)} Hz`);
   if (L.txbat) { const v = fin(L.txbat); tile('TX battery', `${v[0].toFixed(2)} → ${v[v.length - 1].toFixed(2)}`, 'V'); }
   if (L.rssi24) { const v = fin(L.rssi24).filter(x => x > 0); if (v.length) tile('RSSI 2.4G min / mean', `${arrMin(v)} / ${(v.reduce((a, b) => a + b, 0) / v.length).toFixed(0)}`, 'dB'); }
   if (L.vfr) { const v = fin(L.vfr); if (v.length) tile('Frame rate min', arrMin(v), '%'); }
   // Telemetry lost = rows where the receiver reported no RSSI
-  let lost = 0; for (let i = 0; i < L.n; i++) { const r = L.rssi24 ? L.rssi24[i] : NaN; if (!(r > 0)) lost += i + 1 < L.n ? L.t[i + 1] - L.t[i] : L.dt; }
-  tile('No telemetry', lost.toFixed(1), 's');
+  if (L.rssi24) { let lost = 0; for (let i = 0; i < L.n; i++) if (!(L.rssi24[i] > 0)) lost += i + 1 < L.n ? L.t[i + 1] - L.t[i] : L.dt;
+    tile('No telemetry', lost.toFixed(1), 's'); }
   if (L.ch[7]) { let n = 0, p = null; for (const v of L.ch[7]) { if (!Number.isFinite(v)) continue; const q = auxPos(txUs(v)); if (p != null && q === 2 && p !== 2) n++; p = q; } tile(`${txCtl(7)} arm flips`, n); }
   if (txOff != null) tile('Offset to .bin', txOff.toFixed(2), 's');
   document.getElementById('txSummary').innerHTML = tiles.join('');
@@ -4991,7 +5589,7 @@ function renderTxCompare() {
   // ---- Arm / disarm
   const armEv = F.ev.filter(e => e.type === 'arm' || e.type === 'disarm'), used = new Set(), arows = [];
   for (const e of txEdges(7, auxPos)) {
-    const want = e.to === 2 ? 'arm' : e.from === 2 ? 'disarm' : null; if (!want) continue;   // Mid does nothing for ArmDisarm
+    const want = e.to === 2 ? 'arm' : e.to === 0 ? 'disarm' : null; if (!want) continue;   // ArmDisarm: HIGH arms, LOW disarms, MID does nothing
     const j = armEv.findIndex((x, k) => !used.has(k) && x.type === want && x.t >= e.t - 0.6 && x.t <= e.t + 3);   // 0.6 s slack for the radio's ~4 Hz logging
     if (j >= 0) used.add(j);
     const what = `${escHtml(txCtl(7))} &rarr; ${want === 'arm' ? 'ARM' : 'DISARM'}`;
